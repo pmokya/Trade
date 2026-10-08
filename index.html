@@ -30,6 +30,7 @@ nav button.on{color:#2962ff}
 .btn.pri{background:#2962ff;border-color:#2962ff;color:#fff}
 .row{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr auto;gap:6px;align-items:center;padding:13px 14px;border-bottom:1px solid #1e222d}
 .row b{font-weight:600}.n{text-align:right;font-variant-numeric:tabular-nums}
+.hdr{color:#787b86;font-size:11px;text-transform:uppercase;padding:8px 14px;background:#131722}
 .g{color:#26a69a}.r{color:#ef5350}.del{color:#ef5350;font-style:normal;padding:0 4px}
 .bar{display:flex;gap:8px;padding:10px 12px}
 .card{margin:12px;padding:14px;background:#1e222d;border-radius:8px}
@@ -49,7 +50,7 @@ label{font-size:12px;color:#787b86}
 #legend{display:flex;gap:6px;flex-wrap:wrap;padding:4px 10px;min-height:8px}
 .chip{background:#1e222d;border-radius:10px;padding:3px 9px;font-size:11px;color:#d1d4dc}
 #main{flex:1;min-height:0;position:relative}
-#cvmsg{position:absolute;top:8px;left:12px;z-index:2;font-size:12px;color:#787b86}
+#cvmsg{position:absolute;top:8px;left:12px;right:12px;z-index:2;font-size:12px;color:#787b86}
 #panes{max-height:38%;overflow-y:auto}
 .pane{position:relative;border-top:1px solid #2a2e39}.pane small{position:absolute;top:2px;left:8px;z-index:2;color:#787b86;font-size:11px}
 #cvb{display:flex;gap:8px;padding:8px 12px calc(8px + env(safe-area-inset-bottom));border-top:1px solid #2a2e39;background:#1e222d}
@@ -68,6 +69,7 @@ label{font-size:12px;color:#787b86}
  <section class="view on" id="v-wl">
   <div class="tabs" id="wltabs"></div>
   <div class="bar"><button class="btn pri" id="addsym">＋ Add symbol</button><button class="btn" id="edit">Edit</button></div>
+  <div class="row hdr"><span>Symbol</span><span class="n">LTP</span><span class="n">Chg</span><span class="n">Chg %</span><span></span></div>
   <div id="wlrows"></div>
   <div class="bar" id="wlfoot" style="display:none"><button class="btn" id="dellist" style="color:#ef5350">Delete this list</button></div>
  </section>
@@ -76,6 +78,7 @@ label{font-size:12px;color:#787b86}
   <div class="card" style="padding:8px"><div id="pfchart" style="height:150px"></div><div class="hint" id="pfnote" style="padding:6px"></div></div>
   <div class="bar"><button class="btn pri" id="imp">Import Excel / CSV</button><input type="file" id="file" accept=".xlsx,.xls,.csv" hidden></div>
   <div class="hint">Columns: Symbol, Qty, AvgPrice (optional), Type (optional), Price (optional, used for MFs / anything not found on NSE)</div>
+  <div class="row hdr" style="grid-template-columns:1.5fr 1fr 1fr"><span>Holding</span><span class="n">Value ₹</span><span class="n">P&amp;L %</span></div>
   <div id="pfrows"></div>
  </section>
  <section class="view" id="v-set" style="padding:14px">
@@ -113,7 +116,7 @@ const sg=x=>(x>=0?'+':'')+f2(x);
 
 async function api(path,opt={}){
   const r=await fetch(cfg.url.replace(/\/$/,'')+path,{...opt,headers:{'x-app-token':cfg.token,'Content-Type':'application/json'}});
-  if(!r.ok)throw new Error(r.status);return r.json();
+  if(!r.ok){let m='';try{m=(await r.text()).slice(0,160)}catch{}throw new Error(r.status+' '+m)}return r.json();
 }
 function setLive(ok){
   const p=$('#pill');p.className=ok?'on':'off';
@@ -285,13 +288,13 @@ async function loadData(quiet){
   const[iv,days,agg]=TF[tf];if(!quiet)$('#cvmsg').textContent='Loading…';
   try{
     let d=await api(`/candles?token=${CH.t}&interval=${iv}&days=${days}`);
-    d=d.map(x=>({...x,time:x.time+19800}));if(agg)d=aggregate(d,agg);
+    d=d.map(x=>({...x,time:x.time+19800})).filter(x=>isFinite(x.time)&&isFinite(x.open)&&isFinite(x.close)).sort((a,b)=>a.time-b.time).filter((x,i,a)=>!i||x.time>a[i-1].time);if(agg)d=aggregate(d,agg);
     CH.data=d;CH.D={t:d.map(x=>x.time),o:d.map(x=>x.open),h:d.map(x=>x.high),l:d.map(x=>x.low),c:d.map(x=>x.close),v:d.map(x=>x.volume)};
     CH.cs.setData(d);CH.vs.setData(d.map(x=>({time:x.time,value:x.volume,color:x.close>=x.open?'#26a69a55':'#ef535055'})));
     CH.loaded=Date.now();
     if(!quiet){rebuildInds();CH.main.timeScale().setVisibleLogicalRange({from:Math.max(0,d.length-110),to:d.length+6});$('#cvmsg').textContent=d.length?'':'No data for this timeframe'}
     else updateInds();
-  }catch(e){$('#cvmsg').textContent='Could not load candles'}
+  }catch(e){$('#cvmsg').textContent='Could not load candles: '+e.message}
 }
 function tickChart(){
   const q=Q[CH.t];if(!q)return;
