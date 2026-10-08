@@ -69,7 +69,7 @@ label{font-size:12px;color:#787b86}
  <section class="view on" id="v-wl">
   <div class="tabs" id="wltabs"></div>
   <div class="bar"><button class="btn pri" id="addsym">＋ Add symbol</button><button class="btn" id="edit">Edit</button></div>
-  <div class="row hdr"><span>Symbol</span><span class="n">LTP</span><span class="n">Chg</span><span class="n">Chg %</span><span></span></div>
+  <div class="row hdr"><span>Symbol</span><span class="n">LTP ₹</span><span class="n">Chg</span><span class="n">Chg %</span><span></span></div>
   <div id="wlrows"></div>
   <div class="bar" id="wlfoot" style="display:none"><button class="btn" id="dellist" style="color:#ef5350">Delete this list</button></div>
  </section>
@@ -160,7 +160,8 @@ document.addEventListener('click',e=>{
   else if(t.id==='newwl'){const n=prompt('Watchlist name');if(n&&!WL[n]){WL[n]=[];cur=n;SV('wl',WL);SV('cur',cur);renderWL()}}
   else if(t.dataset.del!=null){WL[cur].splice(+t.dataset.del,1);SV('wl',WL);renderWL()}
   else if(t.closest('.row')&&t.closest('#wlrows')&&!editing){const r=t.closest('.row');openChart(r.dataset.s,r.dataset.t)}
-  else if(t.closest('.row')&&t.closest('#pfrows')){const r=t.closest('.row');if(r.dataset.t)openChart(r.dataset.s,r.dataset.t)}
+  else if(t.dataset.fix!=null){openMatch(+t.dataset.fix)}
+  else if(t.closest('.row')&&t.closest('#pfrows')){const r=t.closest('.row');if(r.dataset.t)openChart(r.dataset.sym||r.dataset.s,r.dataset.t);else openMatch(+r.dataset.i)}
 });
 $('#edit').onclick=()=>{editing=!editing;$('#edit').textContent=editing?'Done':'Edit';renderWL()};
 $('#dellist').onclick=()=>{if(confirm('Delete '+cur+'?')){delete WL[cur];cur=Object.keys(WL)[0];SV('wl',WL);SV('cur',cur);renderWL()}};
@@ -169,9 +170,9 @@ $('#addsym').onclick=()=>openSearch(m=>{if(!WL[cur].find(x=>x.t===m.token)){WL[c
 /* ---------- modal / search ---------- */
 function showModal(html){$('#sheet').innerHTML=html;$('#modal').classList.add('show')}
 $('#modal').onclick=e=>{if(e.target.id==='modal')$('#modal').classList.remove('show')};
-function openSearch(cb){
+function openSearch(cb,pre){
   showModal('<input type="text" id="q" placeholder="Search NSE symbol or name" autocapitalize="characters"><div class="list" id="res"></div>');
-  let tm;$('#q').focus();
+  let tm;$('#q').focus();if(pre)setTimeout(()=>{$('#q').value=pre;$('#q').oninput({target:$('#q')})},0);
   $('#q').oninput=e=>{clearTimeout(tm);tm=setTimeout(async()=>{
     const v=e.target.value.trim();if(v.length<2)return;
     try{const r=await api('/search?q='+encodeURIComponent(v));
@@ -189,24 +190,37 @@ $('#file').onchange=async e=>{
   const g=(r,ks)=>{for(const k in r)if(ks.includes(k.toLowerCase().replace(/[^a-z]/g,'')))return r[k]};
   const out=[];
   for(const r of rows){
-    const s=String(g(r,['symbol','stock','scrip','instrument','name'])||'').trim().toUpperCase(),qty=+g(r,['qty','quantity','units','shares']);
+    const s=String(g(r,['symbol','stock','scrip','instrument','name','companyname','securityname','instrumentname','scripname','stockname','tradingsymbol'])||'').trim().toUpperCase(),qty=+g(r,['qty','quantity','units','shares','holdingqty','holdingquantity','totalqty','totalquantity','netqty','quantityheld']);
     if(!s||!qty)continue;
-    out.push({s,qty,avg:+g(r,['avg','avgprice','averageprice','averagecost','buyprice','cost'])||0,type:g(r,['type','category'])||'Stock',man:+g(r,['price','nav','ltp','manualprice'])||0});
+    out.push({s,qty,avg:+g(r,['avg','avgprice','averageprice','averagecost','avgcost','buyprice','cost','buyavg','buyaverage','avgbuyprice','averagebuyprice','avgcostprice','averagecostprice','purchaseprice','avgrate','averagerate','avgvalue','averagevalue'])||0,type:g(r,['type','category'])||'Stock',man:+g(r,['price','nav','ltp','manualprice'])||0});
   }
   $('#pfnote').textContent='Matching symbols…';
-  for(const h of out){try{const r=await api('/search?q='+encodeURIComponent(h.s));const m=r.find(x=>x.symbol===h.s);if(m)h.t=m.token}catch{}}
+  for(let i=0;i<out.length;i++){const h=out[i];$('#pfnote').textContent='Matching symbols '+(i+1)+'/'+out.length+'…';const m=await autoMatch(h.s);if(m){h.t=m.token;h.sym=m.symbol}}
   HOLD=out;SV('hold',HOLD);e.target.value='';refresh();
 };
+async function autoMatch(name){
+  const raw=name.toUpperCase().trim();
+  const w=raw.replace(/[^A-Z0-9& ]/g,' ').split(/\s+/).filter(x=>x&&!['LIMITED','LTD','PVT','PRIVATE'].includes(x));
+  const abbr=x=>x.replace('CORPORATION','CORP').replace('INDUSTRIES','IND').replace('BEARINGS','BEARING').replace('TECHNOLOGIES','TECH').replace('FINANCIAL','FIN');
+  const c=[raw];for(let n=w.length;n>=1;n--){const j=w.slice(0,n).join('');c.push(j,abbr(j))}
+  for(const q of [...new Set(c)]){try{const r=await api('/search?q='+encodeURIComponent(q));const m=r.find(x=>x.symbol===q);if(m)return m}catch{}}
+  return null;
+}
+function openMatch(i){const h=HOLD[i];if(!h)return;openSearch(m=>{h.t=m.token;h.sym=m.symbol;SV('hold',HOLD);refresh()},h.s.split(/\s+/)[0])}
 function renderPF(){
-  let val=0,inv=0,day=0,miss=0;
-  const rows=HOLD.map(h=>{const q=Q[h.t],p=q?.ltp??h.man??0;if(!q&&!h.man)miss++;
-    const v=p*h.qty;val+=v;if(h.avg){inv+=h.avg*h.qty}if(q)day+=(q.netChange||0)*h.qty;
-    return{...h,p,v,pl:h.avg?(p-h.avg)*h.qty:null,plp:h.avg?(p/h.avg-1)*100:null}});
+  let val=0,inv=0,valAvg=0,day=0,miss=0;
+  const rs=x=>(x<0?'-':'+')+'₹'+f2(Math.abs(x));
+  const rows=HOLD.map((h,i)=>{const q=Q[h.t],priced=!!(q||h.man),p=q?.ltp??h.man??0;
+    if(!priced)miss++;
+    const v=priced?p*h.qty:0;val+=v;
+    if(priced&&h.avg){inv+=h.avg*h.qty;valAvg+=v}
+    if(q)day+=(q.netChange||0)*h.qty;
+    return{...h,i,p,v,priced,pl:priced&&h.avg?(p-h.avg)*h.qty:null,plp:priced&&h.avg?(p/h.avg-1)*100:null}});
+  const pl=valAvg-inv;
   $('#pfval').textContent='₹'+f2(val);
-  const pl=inv?val-rows.filter(r=>!r.avg).reduce((a,r)=>a+r.v,0)-inv:0;
-  $('#pfsub').innerHTML=HOLD.length?`<span class="${day>=0?'g':'r'}">Day ${sg(day)}</span>${inv?` &nbsp; <span class="${pl>=0?'g':'r'}">Total P&amp;L ${sg(pl)}</span>`:''}`:'<span class="hint" style="padding:0">No holdings yet</span>';
-  $('#pfrows').innerHTML=rows.sort((a,b)=>b.v-a.v).map(r=>`<div class="row" data-s="${r.s}" data-t="${r.t||''}" style="grid-template-columns:1.5fr 1fr 1fr"><span><b>${r.s}</b><br><small style="color:#787b86">${r.qty} × ${f2(r.p)}${r.t?'':' (manual)'}</small></span><span class="n">${f2(r.v)}</span><span class="n ${(r.pl||0)>=0?'g':'r'}">${r.plp!=null?sg(r.plp)+'%':''}</span></div>`).join('');
-  if(val>0&&!miss){const s=LS('snaps',{}),d=new Date(Date.now()+19800e3).toISOString().slice(0,10);s[d]=Math.round(val*100)/100;SV('snaps',s)}
+  $('#pfsub').innerHTML=HOLD.length?`<span class="${day>=0?'g':'r'}">Day ${rs(day)}</span>${inv?` &nbsp; <span class="${pl>=0?'g':'r'}">P&amp;L ${rs(pl)}</span> &nbsp; <small style="color:#787b86">Invested ₹${f2(inv)}</small>`:''}${miss?`<br><small style="color:#ff9800">${miss} holding(s) not matched to NSE – tap them to pick the symbol</small>`:''}`:'<span class="hint" style="padding:0">No holdings yet</span>';
+  $('#pfrows').innerHTML=[...rows].sort((a,b)=>b.v-a.v).map(r=>`<div class="row" data-i="${r.i}" data-s="${r.s}" data-sym="${r.sym||''}" data-t="${r.t||''}" style="grid-template-columns:1.6fr 1fr 1fr"><span><b>${r.s}</b>${r.t?` <i data-fix="${r.i}" style="font-style:normal;color:#787b86">✎</i>`:''}<br><small style="color:#787b86">${r.sym&&r.sym!==r.s?r.sym+' · ':''}${r.qty} × ${r.priced?'₹'+f2(r.p):'--'}${r.t?'':r.man?' (manual)':''}${r.avg?' · Avg ₹'+f2(r.avg):''}</small>${r.priced?'':'<br><small style="color:#ff9800">Tap to match NSE symbol</small>'}</span><span class="n">${r.priced?'₹'+f2(r.v):'--'}</span><span class="n ${(r.pl||0)>=0?'g':'r'}">${r.plp!=null?sg(r.plp)+'%<br><small>'+rs(r.pl)+'</small>':''}</span></div>`).join('');
+  if(val>0&&!miss){const sn=LS('snaps',{}),d=new Date(Date.now()+19800e3).toISOString().slice(0,10);sn[d]=Math.round(val*100)/100;SV('snaps',sn)}
   if(view==='pf')drawPF();
 }
 function drawPF(){
