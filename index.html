@@ -85,7 +85,8 @@ label{font-size:12px;color:#787b86}
   <label>Render URL</label><input type="url" id="cfgurl" placeholder="https://your-service.onrender.com">
   <label>APP_TOKEN</label><input type="password" id="cfgtok">
   <div class="bar" style="padding:0"><button class="btn pri" id="save">Save &amp; connect</button></div>
-  <p class="hint" style="padding:12px 0">Stored only on this phone. Watchlists, holdings and portfolio history are also stored only on this phone.</p>
+  <p class="hint" id="cloud" style="padding:12px 0 0"></p>
+  <p class="hint" style="padding:6px 0">Watchlists, holdings and portfolio history are saved to your own cloud store (via your Render proxy), so they come back even if this phone forgets them. Only the token is kept on the phone.</p>
  </section>
 </main>
 <nav><button data-v="wl" class="on">Watchlist</button><button data-v="pf">Portfolio</button><button data-v="set">Settings</button></nav>
@@ -105,9 +106,13 @@ label{font-size:12px;color:#787b86}
 <script>
 const $=s=>document.querySelector(s);
 const LS=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v??d}catch{return d}};
-const SV=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
+const SYNC=['wl','cur','hold','inds','tf'];
+let pt=null,snapDirty=false;
+const SV=(k,v)=>{localStorage.setItem(k,JSON.stringify(v));if(SYNC.includes(k))queuePush()};
+if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
 const COL={up:'#26a69a',dn:'#ef5350'},PAL=['#2962ff','#ff9800','#e91e63','#9c27b0','#00bcd4','#ffeb3b','#8bc34a'];
-let cfg=LS('cfg',{url:'',token:''});
+const DEFAULT_URL='https://angle-proxy.onrender.com';
+let cfg=LS('cfg',{url:'',token:''});if(!cfg.url)cfg.url=DEFAULT_URL;
 let WL=LS('wl',{'Watchlist 1':[{s:'RELIANCE',t:'2885'},{s:'TCS',t:'11536'},{s:'HDFCBANK',t:'1333'},{s:'INFY',t:'1594'},{s:'SBIN',t:'3045'}]});
 let cur=LS('cur','Watchlist 1'); if(!WL[cur])cur=Object.keys(WL)[0];
 let HOLD=LS('hold',[]),INDS=LS('inds',[]),tf=LS('tf','1D'),editing=false,Q={},CH=null,pfc=null,view='wl';
@@ -121,6 +126,33 @@ async function api(path,opt={}){
 function setLive(ok){
   const p=$('#pill');p.className=ok?'on':'off';
   p.querySelector('span').textContent=ok?'LIVE · Angel One · '+new Date().toLocaleTimeString('en-GB'):'Disconnected';
+}
+
+/* ---------- cloud sync ---------- */
+const cloud=m=>{const e=$('#cloud');if(e)e.textContent=m};
+function queuePush(){clearTimeout(pt);pt=setTimeout(push,1500)}
+setInterval(()=>{if(snapDirty){snapDirty=false;queuePush()}},60000);
+async function push(){
+  if(!cfg.token)return;
+  const st={ts:Date.now(),wl:WL,cur,hold:HOLD,inds:INDS,tf,snaps:LS('snaps',{})};
+  localStorage.setItem('ts',st.ts);
+  try{await api('/state',{method:'PUT',body:JSON.stringify(st)});cloud('Cloud backup saved '+new Date().toLocaleTimeString('en-GB'))}
+  catch(e){cloud('Cloud backup failed: '+e.message)}
+}
+async function pull(){
+  if(!cfg.token)return;
+  try{
+    const s=await api('/state'),lts=+localStorage.getItem('ts')||0;let need=false;
+    if(s.ts&&s.ts>lts){
+      WL=s.wl||WL;cur=WL[s.cur]?s.cur:Object.keys(WL)[0];HOLD=s.hold||[];INDS=s.inds||[];tf=s.tf||tf;
+      localStorage.setItem('wl',JSON.stringify(WL));localStorage.setItem('cur',JSON.stringify(cur));localStorage.setItem('hold',JSON.stringify(HOLD));
+      localStorage.setItem('inds',JSON.stringify(INDS));localStorage.setItem('tf',JSON.stringify(tf));localStorage.setItem('ts',s.ts);
+    }else if(!s.ts||lts>s.ts)need=true;
+    const sv=s.snaps||{},m={...sv,...LS('snaps',{})};
+    localStorage.setItem('snaps',JSON.stringify(m));
+    if(Object.keys(m).length!==Object.keys(sv).length)need=true;
+    if(need)queuePush();else cloud('Cloud backup in sync');
+  }catch(e){cloud('Cloud backup unavailable: '+e.message)}
 }
 
 /* ---------- refresh ---------- */
@@ -137,7 +169,7 @@ async function refresh(){
   busy=false;renderWL();renderPF();if(CH)tickChart();
 }
 setInterval(()=>{if(!document.hidden)refresh()},5000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)pull().then(refresh)});
 
 /* ---------- navigation ---------- */
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
@@ -220,7 +252,7 @@ function renderPF(){
   $('#pfval').textContent='₹'+f2(val);
   $('#pfsub').innerHTML=HOLD.length?`<span class="${day>=0?'g':'r'}">Day ${rs(day)}</span>${inv?` &nbsp; <span class="${pl>=0?'g':'r'}">P&amp;L ${rs(pl)}</span> &nbsp; <small style="color:#787b86">Invested ₹${f2(inv)}</small>`:''}${miss?`<br><small style="color:#ff9800">${miss} holding(s) not matched to NSE – tap them to pick the symbol</small>`:''}`:'<span class="hint" style="padding:0">No holdings yet</span>';
   $('#pfrows').innerHTML=[...rows].sort((a,b)=>b.v-a.v).map(r=>`<div class="row" data-i="${r.i}" data-s="${r.s}" data-sym="${r.sym||''}" data-t="${r.t||''}" style="grid-template-columns:1.6fr 1fr 1fr"><span><b>${r.s}</b>${r.t?` <i data-fix="${r.i}" style="font-style:normal;color:#787b86">✎</i>`:''}<br><small style="color:#787b86">${r.sym&&r.sym!==r.s?r.sym+' · ':''}${r.qty} × ${r.priced?'₹'+f2(r.p):'--'}${r.t?'':r.man?' (manual)':''}${r.avg?' · Avg ₹'+f2(r.avg):''}</small>${r.priced?'':'<br><small style="color:#ff9800">Tap to match NSE symbol</small>'}</span><span class="n">${r.priced?'₹'+f2(r.v):'--'}</span><span class="n ${(r.pl||0)>=0?'g':'r'}">${r.plp!=null?sg(r.plp)+'%<br><small>'+rs(r.pl)+'</small>':''}</span></div>`).join('');
-  if(val>0&&!miss){const sn=LS('snaps',{}),d=new Date(Date.now()+19800e3).toISOString().slice(0,10);sn[d]=Math.round(val*100)/100;SV('snaps',sn)}
+  if(val>0&&!miss){const sn=LS('snaps',{}),d=new Date(Date.now()+19800e3).toISOString().slice(0,10);sn[d]=Math.round(val*100)/100;localStorage.setItem('snaps',JSON.stringify(sn));snapDirty=true}
   if(view==='pf')drawPF();
 }
 function drawPF(){
@@ -234,8 +266,8 @@ function drawPF(){
 
 /* ---------- settings ---------- */
 $('#cfgurl').value=cfg.url;$('#cfgtok').value=cfg.token;
-$('#save').onclick=()=>{cfg={url:$('#cfgurl').value.trim(),token:$('#cfgtok').value.trim()};SV('cfg',cfg);$('#pill span').textContent='Connecting… (first load can take ~30s)';refresh()};
-if(!cfg.url)document.querySelector('nav [data-v=set]').click();else refresh();
+$('#save').onclick=()=>{cfg={url:$('#cfgurl').value.trim(),token:$('#cfgtok').value.trim()};SV('cfg',cfg);$('#pill span').textContent='Connecting… (first load can take ~30s)';pull().then(refresh)};
+if(!cfg.token)document.querySelector('nav [data-v=set]').click();else pull().then(refresh);
 
 /* ---------- indicator maths ---------- */
 const sma=(a,n)=>a.map((_,i)=>{if(i<n-1)return null;const w=a.slice(i-n+1,i+1);return w.includes(null)?null:w.reduce((x,y)=>x+y,0)/n});
