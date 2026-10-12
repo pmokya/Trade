@@ -127,7 +127,11 @@ const esc=x=>String(x??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(
 const normType=t=>{t=String(t||'').toLowerCase();return !t?'Stock':/etf/.test(t)?'ETF':/mf|mutual|fund/.test(t)?'MF':/stock|equity|share/.test(t)?'Stock':'Other'};
 let MFQ=LS('mfq',{});
 /* MFs / Other must never use an NSE token (old imports wrongly matched MFs to random stocks) */
-function fixHold(){let ch=false;HOLD.forEach(h=>{if(normType(h.type)!=='Stock'&&normType(h.type)!=='ETF'&&h.t){delete h.t;delete h.sym;ch=true}});if(ch)SV('hold',HOLD)}
+const MFRE=/\b(FUND|FUNDS|PLAN|GROWTH|IDCW|DIRECT|REGULAR|ELSS|FLEXI|FOF|SCHEME)\b/i;
+function fixHold(){let ch=false;HOLD.forEach(h=>{
+  if(normType(h.type)==='Stock'&&MFRE.test(String(h.s))){h.type='MF';ch=true}
+  const ty=normType(h.type);if(ty!=='Stock'&&ty!=='ETF'&&h.t){delete h.t;delete h.sym;ch=true}
+});if(ch)SV('hold',HOLD)}
 fixHold();
 async function mfRefresh(){
   const codes=[...new Set(HOLD.filter(h=>h.mf&&normType(h.type)==='MF').map(h=>h.mf))];
@@ -262,7 +266,7 @@ $('#file').onchange=async e=>{
   for(const r of rows){
     const s=String(g(r,['symbol','stock','scrip','instrument','name','companyname','securityname','instrumentname','scripname','stockname','tradingsymbol'])||'').trim().toUpperCase(),qty=+g(r,['qty','quantity','units','shares','holdingqty','holdingquantity','totalqty','totalquantity','netqty','quantityheld']);
     if(!s||!qty)continue;
-    out.push({s,qty,avg:+g(r,['avg','avgprice','averageprice','averagecost','avgcost','buyprice','cost','buyavg','buyaverage','avgbuyprice','averagebuyprice','avgcostprice','averagecostprice','purchaseprice','avgrate','averagerate','avgvalue','averagevalue'])||0,type:normType(g(r,['type','category'])),man:+g(r,['price','nav','ltp','manualprice'])||0});
+    out.push({s,qty,avg:+g(r,['avg','avgprice','averageprice','averagecost','avgcost','buyprice','cost','buyavg','buyaverage','avgbuyprice','averagebuyprice','avgcostprice','averagecostprice','purchaseprice','avgrate','averagerate','avgvalue','averagevalue'])||0,type:(tp=>tp==='Stock'&&MFRE.test(s)?'MF':tp)(normType(g(r,['type','category']))),man:+g(r,['price','nav','ltp','manualprice'])||0});
   }
   $('#pfnote').textContent='Matching symbols…';
   for(let i=0;i<out.length;i++){const h=out[i];$('#pfnote').textContent='Matching symbols '+(i+1)+'/'+out.length+'…';if(h.type!=='Stock'&&h.type!=='ETF')continue;const m=await autoMatch(h.s);if(m){h.t=m.token;h.sym=m.symbol}}
@@ -292,6 +296,7 @@ function renderPF(){
   $('#pfval').textContent='₹'+f2(S.val);
   const gain=S.vAvg-S.inv,gp=S.inv?gain/S.inv*100:0,prev=S.val-S.day,dp=prev>0?S.day/prev*100:0;
   $('#pfsub').innerHTML=HOLD.length?`<div class="stats"><div><small>Invested</small>${S.inv?'₹'+f2(S.inv):'--'}</div><div><small>Today</small><span class="${S.day>=0?'g':'r'}">${rs(S.day)}<br><span style="font-size:12px">${sg(dp)}%</span></span></div><div><small>Total gain</small>${S.inv?`<span class="${gain>=0?'g':'r'}">${rs(gain)}<br><span style="font-size:12px">${sg(gp)}%</span></span>`:'--'}</div></div>${all.miss?`<div style="margin-top:10px;font-size:12px;color:#ff9800">${all.miss} holding(s) have no price – tap them to fix</div>`:''}`:'';
+  {const c={};rows.forEach(r=>{const k=String(r.s).toUpperCase();c[k]=(c[k]||0)+1});const d=Object.keys(c).filter(k=>c[k]>1);if(d.length)$('#pfsub').insertAdjacentHTML('beforeend','<div style="margin-top:10px;font-size:12px;color:#ff9800">Duplicate names: '+d.map(esc).join(', ')+'</div>')}
   $('#pfrows').innerHTML=rows.length?[...shown].sort((a,b)=>b.v-a.v).map(r=>`<div class="row" data-i="${r.i}" style="grid-template-columns:1.6fr 1fr 1fr"><span><b>${esc(r.s)}</b>${r.t?` <i data-chart="${r.i}" style="font-style:normal">📈</i>`:''}<br><small style="color:#787b86">${pfTab==='All'?r.ty+' · ':''}${r.sym&&r.sym!==r.s?esc(r.sym)+' · ':''}${r.qty} × ${r.priced?'₹'+f2(r.p):'--'}${!r.t&&!r.mf&&r.man?' (manual)':''}${r.mf&&MFQ[r.mf]?' · NAV '+esc(MFQ[r.mf].date):''}${r.avg?' · Avg ₹'+f2(r.avg):''}</small>${r.priced?'':`<br><small style="color:#ff9800">Tap to ${r.ty==='MF'?'find fund or set NAV':'set NSE symbol or price'}</small>`}${r.ty==='MF'&&!r.mf?'<br><small style="color:#ff9800">Tap to match fund for live NAV</small>':''}</span><span class="n">${r.priced?'₹'+f2(r.v):'--'}</span><span class="n ${(r.pl||0)>=0?'g':'r'}">${r.plp!=null?sg(r.plp)+'%<br><small>'+rs(r.pl)+'</small>':''}</span></div>`).join(''):'<div class="hint" style="padding:20px">No holdings yet. Tap ＋ Add or import an Excel file.</div>';
   if(all.val>0&&!all.miss){const sn=LS('snaps',{}),d=new Date(Date.now()+19800e3).toISOString().slice(0,10);sn[d]=Math.round(all.val*100)/100;localStorage.setItem('snaps',JSON.stringify(sn));snapDirty=true}
   $('#pfchartcard').style.display=pfTab==='All'?'':'none';
