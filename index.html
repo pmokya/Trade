@@ -38,6 +38,9 @@ nav button.on{color:#2962ff}
 input[type=text],input[type=password],input[type=url]{width:100%;background:#1e222d;border:1px solid #2a2e39;border-radius:6px;color:#d1d4dc;padding:11px;font-size:16px;margin:6px 0 12px}
 label{font-size:12px;color:#787b86}
 .hint{color:#787b86;font-size:12px;padding:0 14px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;font-size:15px;font-weight:600}
+.stats small{display:block;color:#787b86;font-size:11px;font-weight:400;margin-bottom:2px}
+#sheet label{display:block;margin-top:2px}
 /* chart screen */
 #cv{position:fixed;inset:0;background:#131722;display:none;flex-direction:column;padding-top:env(safe-area-inset-top);z-index:5}
 #cv.show{display:flex}
@@ -74,11 +77,12 @@ label{font-size:12px;color:#787b86}
   <div class="bar" id="wlfoot" style="display:none"><button class="btn" id="dellist" style="color:#ef5350">Delete this list</button></div>
  </section>
  <section class="view" id="v-pf">
-  <div class="card"><div style="color:#787b86;font-size:12px">Portfolio value</div><div class="big" id="pfval">₹0</div><div id="pfsub"></div></div>
-  <div class="card" style="padding:8px"><div id="pfchart" style="height:150px"></div><div class="hint" id="pfnote" style="padding:6px"></div></div>
-  <div class="bar"><button class="btn pri" id="imp">Import Excel / CSV</button><input type="file" id="file" accept=".xlsx,.xls,.csv" hidden></div>
+  <div class="tabs" id="pftabs"></div>
+  <div class="card"><div style="color:#787b86;font-size:12px" id="pflabel">Total portfolio value</div><div class="big" id="pfval">₹0</div><div id="pfsub"></div></div>
+  <div class="card" id="pfchartcard" style="padding:8px"><div id="pfchart" style="height:150px"></div><div class="hint" id="pfnote" style="padding:6px"></div></div>
+  <div class="bar"><button class="btn pri" id="addh">＋ Add</button><button class="btn" id="imp">Import Excel / CSV</button><input type="file" id="file" accept=".xlsx,.xls,.csv" hidden></div>
   <div class="hint">Columns: Symbol, Qty, AvgPrice (optional), Type (optional), Price (optional, used for MFs / anything not found on NSE)</div>
-  <div class="row hdr" style="grid-template-columns:1.5fr 1fr 1fr"><span>Holding</span><span class="n">Value ₹</span><span class="n">P&amp;L %</span></div>
+  <div class="row hdr" style="grid-template-columns:1.6fr 1fr 1fr"><span>Holding</span><span class="n">Value ₹</span><span class="n">P&amp;L %</span></div>
   <div id="pfrows"></div>
  </section>
  <section class="view" id="v-set" style="padding:14px">
@@ -107,7 +111,7 @@ label{font-size:12px;color:#787b86}
 const $=s=>document.querySelector(s);
 const LS=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v??d}catch{return d}};
 const SYNC=['wl','cur','hold','inds','tf'];
-let pt=null,snapDirty=false;
+let pt=null,snapDirty=false,pfTab='All',F=null;
 const SV=(k,v)=>{localStorage.setItem(k,JSON.stringify(v));if(SYNC.includes(k))queuePush()};
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
 const COL={up:'#26a69a',dn:'#ef5350'},PAL=['#2962ff','#ff9800','#e91e63','#9c27b0','#00bcd4','#ffeb3b','#8bc34a'];
@@ -118,6 +122,8 @@ let cur=LS('cur','Watchlist 1'); if(!WL[cur])cur=Object.keys(WL)[0];
 let HOLD=LS('hold',[]),INDS=LS('inds',[]),tf=LS('tf','1D'),editing=false,Q={},CH=null,pfc=null,view='wl';
 const f2=x=>x==null?'--':Number(x).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const sg=x=>(x>=0?'+':'')+f2(x);
+const esc=x=>String(x??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+const normType=t=>{t=String(t||'').toLowerCase();return !t?'Stock':/etf/.test(t)?'ETF':/mf|mutual|fund/.test(t)?'MF':/stock|equity|share/.test(t)?'Stock':'Other'};
 
 async function api(path,opt={}){
   const r=await fetch(cfg.url.replace(/\/$/,'')+path,{...opt,headers:{'x-app-token':cfg.token,'Content-Type':'application/json'}});
@@ -189,18 +195,19 @@ function renderWL(){
 document.addEventListener('click',e=>{
   const t=e.target;
   if(t.dataset.wl){cur=t.dataset.wl;SV('cur',cur);renderWL()}
+  else if(t.dataset.pt){pfTab=t.dataset.pt;renderPF()}
   else if(t.id==='newwl'){const n=prompt('Watchlist name');if(n&&!WL[n]){WL[n]=[];cur=n;SV('wl',WL);SV('cur',cur);renderWL()}}
   else if(t.dataset.del!=null){WL[cur].splice(+t.dataset.del,1);SV('wl',WL);renderWL()}
   else if(t.closest('.row')&&t.closest('#wlrows')&&!editing){const r=t.closest('.row');openChart(r.dataset.s,r.dataset.t)}
-  else if(t.dataset.fix!=null){openMatch(+t.dataset.fix)}
-  else if(t.closest('.row')&&t.closest('#pfrows')){const r=t.closest('.row');if(r.dataset.t)openChart(r.dataset.sym||r.dataset.s,r.dataset.t);else openMatch(+r.dataset.i)}
+  else if(t.dataset.chart!=null){const h=HOLD[+t.dataset.chart];if(h&&h.t)openChart(h.sym||h.s,h.t)}
+  else if(t.closest('.row')&&t.closest('#pfrows')){openForm(+t.closest('.row').dataset.i)}
 });
 $('#edit').onclick=()=>{editing=!editing;$('#edit').textContent=editing?'Done':'Edit';renderWL()};
 $('#dellist').onclick=()=>{if(confirm('Delete '+cur+'?')){delete WL[cur];cur=Object.keys(WL)[0];SV('wl',WL);SV('cur',cur);renderWL()}};
 $('#addsym').onclick=()=>openSearch(m=>{if(!WL[cur].find(x=>x.t===m.token)){WL[cur].push({s:m.symbol,t:m.token});SV('wl',WL);refresh()}});
 
 /* ---------- modal / search ---------- */
-function showModal(html){$('#sheet').innerHTML=html;$('#modal').classList.add('show')}
+function showModal(html){$('#sheet').innerHTML=html;$('#sheet').onclick=null;$('#sheet').oninput=null;$('#modal').classList.add('show')}
 $('#modal').onclick=e=>{if(e.target.id==='modal')$('#modal').classList.remove('show')};
 function openSearch(cb,pre){
   showModal('<input type="text" id="q" placeholder="Search NSE symbol or name" autocapitalize="characters"><div class="list" id="res"></div>');
@@ -209,7 +216,7 @@ function openSearch(cb,pre){
     const v=e.target.value.trim();if(v.length<2)return;
     try{const r=await api('/search?q='+encodeURIComponent(v));
       $('#res').innerHTML=r.map((m,i)=>`<div class="it" data-i="${i}"><b>${m.symbol}</b><small>${m.name||''}</small></div>`).join('');
-      $('#res').onclick=ev=>{const it=ev.target.closest('.it');if(it){cb(r[+it.dataset.i]);$('#modal').classList.remove('show')}};
+      $('#res').onclick=ev=>{const it=ev.target.closest('.it');if(it){$('#modal').classList.remove('show');cb(r[+it.dataset.i])}};
     }catch{$('#res').innerHTML='<div class="it">Search failed – check Settings</div>'}
   },300)};
 }
@@ -224,11 +231,12 @@ $('#file').onchange=async e=>{
   for(const r of rows){
     const s=String(g(r,['symbol','stock','scrip','instrument','name','companyname','securityname','instrumentname','scripname','stockname','tradingsymbol'])||'').trim().toUpperCase(),qty=+g(r,['qty','quantity','units','shares','holdingqty','holdingquantity','totalqty','totalquantity','netqty','quantityheld']);
     if(!s||!qty)continue;
-    out.push({s,qty,avg:+g(r,['avg','avgprice','averageprice','averagecost','avgcost','buyprice','cost','buyavg','buyaverage','avgbuyprice','averagebuyprice','avgcostprice','averagecostprice','purchaseprice','avgrate','averagerate','avgvalue','averagevalue'])||0,type:g(r,['type','category'])||'Stock',man:+g(r,['price','nav','ltp','manualprice'])||0});
+    out.push({s,qty,avg:+g(r,['avg','avgprice','averageprice','averagecost','avgcost','buyprice','cost','buyavg','buyaverage','avgbuyprice','averagebuyprice','avgcostprice','averagecostprice','purchaseprice','avgrate','averagerate','avgvalue','averagevalue'])||0,type:normType(g(r,['type','category'])),man:+g(r,['price','nav','ltp','manualprice'])||0});
   }
   $('#pfnote').textContent='Matching symbols…';
   for(let i=0;i<out.length;i++){const h=out[i];$('#pfnote').textContent='Matching symbols '+(i+1)+'/'+out.length+'…';const m=await autoMatch(h.s);if(m){h.t=m.token;h.sym=m.symbol}}
-  HOLD=out;SV('hold',HOLD);e.target.value='';refresh();
+  if(HOLD.length&&!confirm('Replace all current holdings with this file?\n\nOK = Replace\nCancel = Add to existing'))HOLD=[...HOLD,...out];else HOLD=out;
+  SV('hold',HOLD);e.target.value='';refresh();
 };
 async function autoMatch(name){
   const raw=name.toUpperCase().trim();
@@ -240,20 +248,59 @@ async function autoMatch(name){
 }
 function openMatch(i){const h=HOLD[i];if(!h)return;openSearch(m=>{h.t=m.token;h.sym=m.symbol;SV('hold',HOLD);refresh()},h.s.split(/\s+/)[0])}
 function renderPF(){
-  let val=0,inv=0,valAvg=0,day=0,miss=0;
   const rs=x=>(x<0?'-':'+')+'₹'+f2(Math.abs(x));
-  const rows=HOLD.map((h,i)=>{const q=Q[h.t],priced=!!(q||h.man),p=q?.ltp??h.man??0;
-    if(!priced)miss++;
-    const v=priced?p*h.qty:0;val+=v;
-    if(priced&&h.avg){inv+=h.avg*h.qty;valAvg+=v}
-    if(q)day+=(q.netChange||0)*h.qty;
-    return{...h,i,p,v,priced,pl:priced&&h.avg?(p-h.avg)*h.qty:null,plp:priced&&h.avg?(p/h.avg-1)*100:null}});
-  const pl=valAvg-inv;
-  $('#pfval').textContent='₹'+f2(val);
-  $('#pfsub').innerHTML=HOLD.length?`<span class="${day>=0?'g':'r'}">Day ${rs(day)}</span>${inv?` &nbsp; <span class="${pl>=0?'g':'r'}">P&amp;L ${rs(pl)}</span> &nbsp; <small style="color:#787b86">Invested ₹${f2(inv)}</small>`:''}${miss?`<br><small style="color:#ff9800">${miss} holding(s) not matched to NSE – tap them to pick the symbol</small>`:''}`:'<span class="hint" style="padding:0">No holdings yet</span>';
-  $('#pfrows').innerHTML=[...rows].sort((a,b)=>b.v-a.v).map(r=>`<div class="row" data-i="${r.i}" data-s="${r.s}" data-sym="${r.sym||''}" data-t="${r.t||''}" style="grid-template-columns:1.6fr 1fr 1fr"><span><b>${r.s}</b>${r.t?` <i data-fix="${r.i}" style="font-style:normal;color:#787b86">✎</i>`:''}<br><small style="color:#787b86">${r.sym&&r.sym!==r.s?r.sym+' · ':''}${r.qty} × ${r.priced?'₹'+f2(r.p):'--'}${r.t?'':r.man?' (manual)':''}${r.avg?' · Avg ₹'+f2(r.avg):''}</small>${r.priced?'':'<br><small style="color:#ff9800">Tap to match NSE symbol</small>'}</span><span class="n">${r.priced?'₹'+f2(r.v):'--'}</span><span class="n ${(r.pl||0)>=0?'g':'r'}">${r.plp!=null?sg(r.plp)+'%<br><small>'+rs(r.pl)+'</small>':''}</span></div>`).join('');
-  if(val>0&&!miss){const sn=LS('snaps',{}),d=new Date(Date.now()+19800e3).toISOString().slice(0,10);sn[d]=Math.round(val*100)/100;localStorage.setItem('snaps',JSON.stringify(sn));snapDirty=true}
-  if(view==='pf')drawPF();
+  const rows=HOLD.map((h,i)=>{const q=Q[h.t],priced=!!(q||h.man),p=q?.ltp??h.man??0,v=priced?p*h.qty:0,hasAvg=priced&&h.avg>0;
+    return{...h,i,ty:normType(h.type),p,v,priced,day:q?(q.netChange||0)*h.qty:0,inv:hasAvg?h.avg*h.qty:0,vAvg:hasAvg?v:0,pl:hasAvg?(p-h.avg)*h.qty:null,plp:hasAvg?(p/h.avg-1)*100:null}});
+  const sum=a=>a.reduce((o,r)=>({val:o.val+r.v,inv:o.inv+r.inv,vAvg:o.vAvg+r.vAvg,day:o.day+r.day,miss:o.miss+(r.priced?0:1)}),{val:0,inv:0,vAvg:0,day:0,miss:0});
+  const all=sum(rows);
+  if(pfTab!=='All'&&!rows.some(r=>r.ty===pfTab))pfTab='All';
+  const shown=pfTab==='All'?rows:rows.filter(r=>r.ty===pfTab),S=sum(shown);
+  const TABS=[['All','All'],['Stock','Stocks'],['ETF','ETFs'],['MF','MFs'],['Other','Other']].filter(([k])=>k==='All'||rows.some(r=>r.ty===k));
+  $('#pftabs').innerHTML=TABS.map(([k,l])=>`<button class="tab ${k===pfTab?'on':''}" data-pt="${k}">${l}${k==='All'?'':' '+rows.filter(r=>r.ty===k).length}</button>`).join('');
+  $('#pflabel').textContent=pfTab==='All'?'Total portfolio value':TABS.find(x=>x[0]===pfTab)[1]+' value';
+  $('#pfval').textContent='₹'+f2(S.val);
+  const gain=S.vAvg-S.inv,gp=S.inv?gain/S.inv*100:0,prev=S.val-S.day,dp=prev>0?S.day/prev*100:0;
+  $('#pfsub').innerHTML=HOLD.length?`<div class="stats"><div><small>Invested</small>${S.inv?'₹'+f2(S.inv):'--'}</div><div><small>Today</small><span class="${S.day>=0?'g':'r'}">${rs(S.day)}<br><span style="font-size:12px">${sg(dp)}%</span></span></div><div><small>Total gain</small>${S.inv?`<span class="${gain>=0?'g':'r'}">${rs(gain)}<br><span style="font-size:12px">${sg(gp)}%</span></span>`:'--'}</div></div>${all.miss?`<div style="margin-top:10px;font-size:12px;color:#ff9800">${all.miss} holding(s) have no price – tap them to fix</div>`:''}`:'';
+  $('#pfrows').innerHTML=rows.length?[...shown].sort((a,b)=>b.v-a.v).map(r=>`<div class="row" data-i="${r.i}" style="grid-template-columns:1.6fr 1fr 1fr"><span><b>${esc(r.s)}</b>${r.t?` <i data-chart="${r.i}" style="font-style:normal">📈</i>`:''}<br><small style="color:#787b86">${pfTab==='All'?r.ty+' · ':''}${r.sym&&r.sym!==r.s?esc(r.sym)+' · ':''}${r.qty} × ${r.priced?'₹'+f2(r.p):'--'}${!r.t&&r.man?' (manual)':''}${r.avg?' · Avg ₹'+f2(r.avg):''}</small>${r.priced?'':'<br><small style="color:#ff9800">Tap to set NSE symbol or price</small>'}</span><span class="n">${r.priced?'₹'+f2(r.v):'--'}</span><span class="n ${(r.pl||0)>=0?'g':'r'}">${r.plp!=null?sg(r.plp)+'%<br><small>'+rs(r.pl)+'</small>':''}</span></div>`).join(''):'<div class="hint" style="padding:20px">No holdings yet. Tap ＋ Add or import an Excel file.</div>';
+  if(all.val>0&&!all.miss){const sn=LS('snaps',{}),d=new Date(Date.now()+19800e3).toISOString().slice(0,10);sn[d]=Math.round(all.val*100)/100;localStorage.setItem('snaps',JSON.stringify(sn));snapDirty=true}
+  $('#pfchartcard').style.display=pfTab==='All'?'':'none';
+  if(view==='pf'&&pfTab==='All')drawPF();
+}
+$('#addh').onclick=()=>openForm(-1);
+function openForm(i){
+  F=i>=0?{...HOLD[i],type:normType(HOLD[i].type),i}:{i:-1,type:'Stock',s:'',qty:'',avg:'',man:'',t:null,sym:null};
+  renderForm();
+}
+function renderForm(){
+  const nse=F.type==='Stock'||F.type==='ETF';
+  showModal(`<h3 style="margin:0 0 10px">${F.i>=0?'Edit holding':'Add holding'}</h3><div style="overflow-y:auto">
+  <div class="bar" style="padding:0 0 10px">${['Stock','ETF','MF','Other'].map(x=>`<button class="tab ${F.type===x?'on':''}" data-ft="${x}">${x}</button>`).join('')}</div>
+  <label>${nse?'Name or NSE symbol':F.type==='MF'?'Fund name':'Name'}</label>
+  <input type="text" id="fs" value="${esc(F.s)}" placeholder="${nse?'e.g. RELIANCE':'e.g. Parag Parikh Flexi Cap'}">
+  ${nse?`<div class="bar" style="padding:0 0 10px;align-items:center"><button class="btn" id="fnse">${F.t?'Change NSE match':'Find on NSE'}</button><small style="color:${F.t?'#26a69a':'#ff9800'}">${F.t?'Matched: '+esc(F.sym):'Not matched yet'}</small></div>`:''}
+  <label>${F.type==='MF'?'Units':'Quantity'}</label><input type="text" inputmode="decimal" id="fq" value="${esc(F.qty)}">
+  <label>Average buy price ₹ (optional, for gain)</label><input type="text" inputmode="decimal" id="fa" value="${esc(F.avg)}">
+  <label>${nse?'Price ₹ (only used if no live NSE price)':'Latest price / NAV ₹'}</label><input type="text" inputmode="decimal" id="fm" value="${esc(F.man)}">
+  <div class="bar" style="padding:4px 0 0"><button class="btn pri" id="fsave">Save</button>${F.t?'<button class="btn" id="fchart">View chart</button>':''}${F.i>=0?'<button class="btn" id="fdel" style="color:#ef5350;margin-left:auto">Delete</button>':''}</div></div>`);
+  $('#sheet').oninput=e=>{const k={fs:'s',fq:'qty',fa:'avg',fm:'man'}[e.target.id];if(k)F[k]=e.target.value};
+  $('#sheet').onclick=e=>{const t=e.target;
+    if(t.dataset.ft){F.type=t.dataset.ft;if(F.type==='MF'||F.type==='Other'){F.t=null;F.sym=null}renderForm()}
+    else if(t.id==='fnse')openSearch(m=>{F.t=m.token;F.sym=m.symbol;if(!String(F.s).trim())F.s=m.symbol;renderForm()},F.s)
+    else if(t.id==='fsave')saveForm()
+    else if(t.id==='fchart'){$('#modal').classList.remove('show');openChart(F.sym||F.s,F.t)}
+    else if(t.id==='fdel'&&confirm('Delete this holding?')){HOLD.splice(F.i,1);SV('hold',HOLD);$('#modal').classList.remove('show');renderPF()}
+  };
+}
+async function saveForm(){
+  const name=String(F.s||'').trim(),qty=+F.qty,avg=+F.avg||0,man=+F.man||0;
+  if(!name)return alert('Enter a name or symbol');
+  if(!(qty>0))return alert('Enter a quantity / units greater than 0');
+  let t=F.t,sym=F.sym;
+  if(!t&&(F.type==='Stock'||F.type==='ETF')){const m=await autoMatch(name);if(m){t=m.token;sym=m.symbol}}
+  if(!t&&!man&&!confirm('No NSE match and no price entered. Save anyway? Its value will show -- until you edit it.'))return;
+  const item={s:name,qty,avg,type:F.type,man,...(t?{t,sym}:{})};
+  if(F.i>=0)HOLD[F.i]=item;else HOLD.push(item);
+  SV('hold',HOLD);$('#modal').classList.remove('show');refresh();
 }
 function drawPF(){
   if(typeof LightweightCharts==='undefined')return;
