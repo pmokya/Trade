@@ -72,6 +72,7 @@ label{font-size:12px;color:#787b86}
  <section class="view on" id="v-wl">
   <div class="tabs" id="wltabs"></div>
   <div class="bar"><button class="btn pri" id="addsym">＋ Add symbol</button><button class="btn" id="edit">Edit</button></div>
+  <div class="tabs" id="wlsort" style="padding:6px 12px"></div>
   <div class="row hdr"><span>Symbol</span><span class="n">LTP ₹</span><span class="n">Chg</span><span class="n">Chg %</span><span></span></div>
   <div id="wlrows"></div>
   <div class="bar" id="wlfoot" style="display:none"><button class="btn" id="dellist" style="color:#ef5350">Delete this list</button></div>
@@ -83,6 +84,7 @@ label{font-size:12px;color:#787b86}
   <div class="bar"><button class="btn pri" id="addh">＋ Add</button><button class="btn" id="imp">Import Excel / CSV</button><input type="file" id="file" accept=".xlsx,.xls,.csv" hidden></div>
   <div class="hint">Columns: Symbol, Qty, AvgPrice (optional), Type (optional), Price (optional, used for MFs / anything not found on NSE)</div>
   <div class="row hdr" style="grid-template-columns:1.6fr 1fr 1fr"><span>Holding</span><span class="n">Value ₹</span><span class="n">P&amp;L %</span></div>
+  <div class="tabs" id="pfsort" style="padding:6px 12px"></div>
   <div id="pfrows"></div>
  </section>
  <section class="view" id="v-set" style="padding:14px">
@@ -126,6 +128,16 @@ const sg=x=>(x>=0?'+':'')+f2(x);
 const esc=x=>String(x??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 const normType=t=>{t=String(t||'').toLowerCase();return !t?'Stock':/etf/.test(t)?'ETF':/mf|mutual|fund/.test(t)?'MF':/stock|equity|share/.test(t)?'Stock':'Other'};
 let MFQ=LS('mfq',{});
+let PFS=LS('pfsort',{k:'v',d:-1}),WLS=LS('wlsort',{k:'',d:1});
+const cmpBy=(k,d,gx)=>(a,b)=>{
+  if(k==='s')return d*String(gx(a)).localeCompare(String(gx(b)));
+  const x=gx(a),y=gx(b),nx=x==null||!isFinite(x),ny=y==null||!isFinite(y);
+  if(nx&&ny)return 0;if(nx)return 1;if(ny)return -1;return d*(x-y)};
+const sortChip=(attr,k,l,S)=>`<button class="tab ${S.k===k?'on':''}" data-${attr}="${k}">${l}${S.k===k?(S.d<0?' ↓':' ↑'):''}</button>`;
+function wlSorted(){
+  const a=(WL[cur]||[]).map((x,i)=>({x,i}));if(!WLS.k)return a;
+  return a.sort(cmpBy(WLS.k,WLS.d,o=>WLS.k==='s'?o.x.s:(Q[o.x.t]||{})[WLS.k]));
+}
 /* MFs / Other must never use an NSE token (old imports wrongly matched MFs to random stocks) */
 const MFRE=/\b(FUND|FUNDS|PLAN|GROWTH|IDCW|DIRECT|REGULAR|ELSS|FLEXI|FOF|SCHEME)\b/i;
 function fixHold(){let ch=false;HOLD.forEach(h=>{
@@ -205,15 +217,18 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
 /* ---------- watchlist ---------- */
 function renderWL(){
   $('#wltabs').innerHTML=Object.keys(WL).map(n=>`<button class="tab ${n===cur?'on':''}" data-wl="${n}">${n}</button>`).join('')+'<button class="tab" id="newwl">＋</button>';
-  $('#wlrows').innerHTML=(WL[cur]||[]).map((x,i)=>{const q=Q[x.t]||{},up=(q.netChange||0)>=0;
+  $('#wlrows').innerHTML=wlSorted().map(({x,i})=>{const q=Q[x.t]||{},up=(q.netChange||0)>=0;
     return `<div class="row" data-s="${x.s}" data-t="${x.t}"><b>${x.s}</b><span class="n">${f2(q.ltp)}</span><span class="n ${up?'g':'r'}">${q.netChange!=null?sg(q.netChange):''}</span><span class="n ${up?'g':'r'}">${q.percentChange!=null?sg(q.percentChange)+'%':''}</span>${editing?`<i class="del" data-del="${i}">✕</i>`:'<span></span>'}</div>`}).join('')
     ||'<div class="hint" style="padding:20px">Empty list. Tap “Add symbol”.</div>';
+  $('#wlsort').innerHTML=(WL[cur]||[]).length>1?[['s','Name'],['ltp','Price'],['netChange','Chg'],['percentChange','Chg %']].map(([k,l])=>sortChip('ws',k,l,WLS)).join('')+(WLS.k?'<button class="tab" data-ws="">✕</button>':''):'';
   $('#wlfoot').style.display=editing&&Object.keys(WL).length>1?'flex':'none';
 }
 document.addEventListener('click',e=>{
   const t=e.target;
   if(t.dataset.wl){cur=t.dataset.wl;SV('cur',cur);renderWL()}
   else if(t.dataset.pt){pfTab=t.dataset.pt;renderPF()}
+  else if(t.dataset.ps){const k=t.dataset.ps;PFS=PFS.k===k?{k,d:-PFS.d}:{k,d:k==='s'?1:-1};localStorage.setItem('pfsort',JSON.stringify(PFS));renderPF()}
+  else if(t.dataset.ws!=null){const k=t.dataset.ws;WLS=!k?{k:'',d:1}:WLS.k===k?{k,d:-WLS.d}:{k,d:k==='s'?1:-1};localStorage.setItem('wlsort',JSON.stringify(WLS));renderWL()}
   else if(t.id==='newwl'){const n=prompt('Watchlist name');if(n&&!WL[n]){WL[n]=[];cur=n;SV('wl',WL);SV('cur',cur);renderWL()}}
   else if(t.dataset.del!=null){WL[cur].splice(+t.dataset.del,1);SV('wl',WL);renderWL()}
   else if(t.closest('.row')&&t.closest('#wlrows')&&!editing){const r=t.closest('.row');openChart(r.dataset.s,r.dataset.t)}
@@ -285,7 +300,7 @@ function openMatch(i){const h=HOLD[i];if(!h)return;openSearch(m=>{h.t=m.token;h.
 function renderPF(){
   const rs=x=>(x<0?'-':'+')+'₹'+f2(Math.abs(x));
   const rows=HOLD.map((h,i)=>{const isMF=normType(h.type)==='MF',q=isMF?null:Q[h.t],mn=isMF&&h.mf&&MFQ[h.mf]?MFQ[h.mf].nav:null,priced=!!(q||mn||h.man),p=q?.ltp??mn??h.man??0,v=priced?p*h.qty:0,hasAvg=priced&&h.avg>0;
-    return{...h,i,ty:normType(h.type),p,v,priced,day:q?(q.netChange||0)*h.qty:0,inv:hasAvg?h.avg*h.qty:0,vAvg:hasAvg?v:0,pl:hasAvg?(p-h.avg)*h.qty:null,plp:hasAvg?(p/h.avg-1)*100:null}});
+    return{...h,i,ty:normType(h.type),p,v,priced,day:q?(q.netChange||0)*h.qty:0,dayp:q?.percentChange??null,inv:hasAvg?h.avg*h.qty:0,vAvg:hasAvg?v:0,pl:hasAvg?(p-h.avg)*h.qty:null,plp:hasAvg?(p/h.avg-1)*100:null}});
   const sum=a=>a.reduce((o,r)=>({val:o.val+r.v,inv:o.inv+r.inv,vAvg:o.vAvg+r.vAvg,day:o.day+r.day,miss:o.miss+(r.priced?0:1)}),{val:0,inv:0,vAvg:0,day:0,miss:0});
   const all=sum(rows);
   if(pfTab!=='All'&&!rows.some(r=>r.ty===pfTab))pfTab='All';
@@ -298,7 +313,8 @@ function renderPF(){
   $('#pfsub').innerHTML=HOLD.length?`<div class="stats"><div><small>Invested</small>${S.inv?'₹'+f2(S.inv):'--'}</div><div><small>Today</small><span class="${S.day>=0?'g':'r'}">${rs(S.day)}<br><span style="font-size:12px">${sg(dp)}%</span></span></div><div><small>Total gain</small>${S.inv?`<span class="${gain>=0?'g':'r'}">${rs(gain)}<br><span style="font-size:12px">${sg(gp)}%</span></span>`:'--'}</div></div>${all.miss?`<div style="margin-top:10px;font-size:12px;color:#ff9800">${all.miss} holding(s) have no price – tap them to fix</div>`:''}`:'';
   if(pfTab==='All'&&HOLD.length){const parts=TABS.filter(([k])=>k!=='All').map(([k,l])=>{const x=sum(rows.filter(r=>r.ty===k));return l+' ('+rows.filter(r=>r.ty===k).length+'): invested ₹'+f2(x.inv)+' · value ₹'+f2(x.val)});$('#pfsub').insertAdjacentHTML('beforeend','<div style="margin-top:10px;font-size:12px;color:#787b86;line-height:1.7">'+parts.join('<br>')+'</div>')}
   {const c={};rows.forEach(r=>{const k=String(r.s).toUpperCase();c[k]=(c[k]||0)+1});const d=Object.keys(c).filter(k=>c[k]>1);if(d.length)$('#pfsub').insertAdjacentHTML('beforeend','<div style="margin-top:10px;font-size:12px;color:#ff9800">Duplicate names: '+d.map(esc).join(', ')+'</div>')}
-  $('#pfrows').innerHTML=rows.length?[...shown].sort((a,b)=>b.v-a.v).map(r=>`<div class="row" data-i="${r.i}" style="grid-template-columns:1.6fr 1fr 1fr"><span><b>${esc(r.s)}</b>${r.t?` <i data-chart="${r.i}" style="font-style:normal">📈</i>`:''}<br><small style="color:#787b86">${pfTab==='All'?r.ty+' · ':''}${r.sym&&r.sym!==r.s?esc(r.sym)+' · ':''}${r.qty} × ${r.priced?'₹'+f2(r.p):'--'}${!r.t&&!r.mf&&r.man?' (manual)':''}${r.mf&&MFQ[r.mf]?' · NAV '+esc(MFQ[r.mf].date):''}${r.avg?' · Avg ₹'+f2(r.avg):''}</small>${r.priced?'':`<br><small style="color:#ff9800">Tap to ${r.ty==='MF'?'find fund or set NAV':'set NSE symbol or price'}</small>`}${r.ty==='MF'&&!r.mf?'<br><small style="color:#ff9800">Tap to match fund for live NAV</small>':''}</span><span class="n">${r.priced?'₹'+f2(r.v):'--'}</span><span class="n ${(r.pl||0)>=0?'g':'r'}">${r.plp!=null?sg(r.plp)+'%<br><small>'+rs(r.pl)+'</small>':''}</span></div>`).join(''):'<div class="hint" style="padding:20px">No holdings yet. Tap ＋ Add or import an Excel file.</div>';
+  $('#pfsort').innerHTML=shown.length>1?[['v','Value'],['inv','Invested'],['day','Today'],['dayp','Today %'],['pl','P&L'],['plp','P&L %'],['s','Name']].map(([k,l])=>sortChip('ps',k,l,PFS)).join(''):'';
+  $('#pfrows').innerHTML=rows.length?[...shown].sort(cmpBy(PFS.k,PFS.d,r=>r[PFS.k])).map(r=>`<div class="row" data-i="${r.i}" style="grid-template-columns:1.6fr 1fr 1fr"><span><b>${esc(r.s)}</b>${r.t?` <i data-chart="${r.i}" style="font-style:normal">📈</i>`:''}<br><small style="color:#787b86">${pfTab==='All'?r.ty+' · ':''}${r.sym&&r.sym!==r.s?esc(r.sym)+' · ':''}${r.qty} × ${r.priced?'₹'+f2(r.p):'--'}${!r.t&&!r.mf&&r.man?' (manual)':''}${r.mf&&MFQ[r.mf]?' · NAV '+esc(MFQ[r.mf].date):''}${r.avg?' · Avg ₹'+f2(r.avg):''}</small>${r.priced?'':`<br><small style="color:#ff9800">Tap to ${r.ty==='MF'?'find fund or set NAV':'set NSE symbol or price'}</small>`}${r.ty==='MF'&&!r.mf?'<br><small style="color:#ff9800">Tap to match fund for live NAV</small>':''}</span><span class="n">${r.priced?'₹'+f2(r.v):'--'}</span><span class="n ${(r.pl||0)>=0?'g':'r'}">${r.plp!=null?sg(r.plp)+'%<br><small>'+rs(r.pl)+'</small>':''}</span></div>`).join(''):'<div class="hint" style="padding:20px">No holdings yet. Tap ＋ Add or import an Excel file.</div>';
   if(all.val>0&&!all.miss){const sn=LS('snaps',{}),d=new Date(Date.now()+19800e3).toISOString().slice(0,10);sn[d]=Math.round(all.val*100)/100;localStorage.setItem('snaps',JSON.stringify(sn));snapDirty=true}
   $('#pfchartcard').style.display=pfTab==='All'?'':'none';
   if(view==='pf'&&pfTab==='All')drawPF();
