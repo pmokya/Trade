@@ -32,7 +32,7 @@ nav button.on{color:#2962ff}
 .row b{font-weight:600}.n{text-align:right;font-variant-numeric:tabular-nums}
 .hdr{color:#787b86;font-size:11px;text-transform:uppercase;padding:8px 14px;background:#131722}
 .g{color:#26a69a}.r{color:#ef5350}.del{color:#ef5350;font-style:normal;padding:0 4px}
-.bar{display:flex;gap:8px;padding:10px 12px}
+.bar{display:flex;gap:8px;padding:10px 12px;flex-wrap:wrap}
 .card{margin:12px;padding:14px;background:#1e222d;border-radius:8px}
 .big{font-size:26px;font-weight:600}
 input[type=text],input[type=password],input[type=url]{width:100%;background:#1e222d;border:1px solid #2a2e39;border-radius:6px;color:#d1d4dc;padding:11px;font-size:16px;margin:6px 0 12px}
@@ -64,14 +64,18 @@ label{font-size:12px;color:#787b86}
 #sheet .list{overflow-y:auto}
 #sheet .it{padding:13px 4px;border-bottom:1px solid #2a2e39;display:flex;justify-content:space-between}
 #sheet small{color:#787b86}
-</style></head>
+</style>
+<link rel="preconnect" href="https://angle-proxy.onrender.com">
+<script>try{var _c=JSON.parse(localStorage.getItem('cfg')||'{}');fetch((_c.url||'https://angle-proxy.onrender.com')+'/',{mode:'no-cors',cache:'no-store'}).catch(function(){})}catch(e){}</script>
+</head>
 <body>
 <div id="app">
 <header><h1>Trade</h1><div id="pill"><i></i><span>Not connected</span></div></header>
 <main>
  <section class="view on" id="v-wl">
   <div class="tabs" id="wltabs"></div>
-  <div class="bar"><button class="btn pri" id="addsym">＋ Add symbol</button><button class="btn" id="edit">Edit</button></div>
+  <div class="bar"><button class="btn pri" id="addsym">＋ Add symbol</button><button class="btn" id="wlimp">Import Excel / CSV</button><button class="btn" id="edit">Edit</button><input type="file" id="wlfile" accept=".xlsx,.xls,.csv" hidden></div>
+  <div class="hint" id="wlnote" style="padding:0 12px"></div>
   <div class="tabs" id="wlsort" style="padding:6px 12px"></div>
   <div class="row hdr"><span>Symbol</span><span class="n">LTP ₹</span><span class="n">Chg</span><span class="n">Chg %</span><span></span></div>
   <div id="wlrows"></div>
@@ -80,10 +84,10 @@ label{font-size:12px;color:#787b86}
  <section class="view" id="v-pf">
   <div class="tabs" id="pftabs"></div>
   <div class="card"><div style="color:#787b86;font-size:12px" id="pflabel">Total portfolio value</div><div class="big" id="pfval">₹0</div><div id="pfsub"></div></div>
-  <div class="card" id="pfchartcard" style="padding:8px"><div id="pfchart" style="height:150px"></div><div class="hint" id="pfnote" style="padding:6px"></div></div>
+  <div class="card" id="pfchartcard" style="padding:8px"><div id="pfchart" style="height:150px"></div><div class="tabs" style="padding:6px 0 0;border:0"><button class="tab" data-pr="15">15D</button><button class="tab" data-pr="30">1M</button><button class="tab" data-pr="90">3M</button><button class="tab" data-pr="0">All</button></div><div class="hint" id="pfnote" style="padding:6px"></div></div>
   <div class="bar"><button class="btn pri" id="addh">＋ Add</button><button class="btn" id="imp">Import Excel / CSV</button><input type="file" id="file" accept=".xlsx,.xls,.csv" hidden></div>
   <div class="hint">Columns: Symbol, Qty, AvgPrice (optional), Type (optional), Price (optional, used for MFs / anything not found on NSE)</div>
-  <div class="row hdr" style="grid-template-columns:1.6fr 1fr 1fr"><span>Holding</span><span class="n">Value ₹</span><span class="n">P&amp;L %</span></div>
+  <div class="row hdr" style="grid-template-columns:1.6fr 1fr 1fr"><span>Holding</span><span class="n" id="pfh2">Value ₹</span><span class="n" id="pfh3">P&amp;L %</span></div>
   <div class="tabs" id="pfsort" style="padding:6px 12px"></div>
   <div id="pfrows"></div>
  </section>
@@ -93,6 +97,8 @@ label{font-size:12px;color:#787b86}
   <div class="bar" style="padding:0"><button class="btn pri" id="save">Save &amp; connect</button></div>
   <p class="hint" id="cloud" style="padding:12px 0 0"></p>
   <div class="bar" style="padding:0"><button class="btn" id="rsnap" style="color:#ef5350">Reset portfolio trend history</button></div>
+  <div class="bar" style="padding:8px 0 0"><button class="btn" id="spd">Test connection speed</button></div>
+  <pre class="hint" id="spdout" style="white-space:pre-wrap;padding:6px 0;font-family:inherit"></pre>
   <p class="hint" style="padding:6px 0">Watchlists, holdings and portfolio history are saved to your own cloud store (via your Render proxy), so they come back even if this phone forgets them. Only the token is kept on the phone.</p>
  </section>
 </main>
@@ -108,12 +114,15 @@ label{font-size:12px;color:#787b86}
 </div>
 <div id="modal"><div id="sheet"></div></div>
 
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
 const LS=(k,d)=>{try{const v=JSON.parse(localStorage.getItem(k));return v??d}catch{return d}};
-const SYNC=['wl','cur','hold','inds','tf'];
+const SYNC=['wl','cur','hold','inds','tf','pfrange'];
+const loadJS=u=>new Promise((res,rej)=>{const e=document.createElement('script');e.src=u;e.onload=res;e.onerror=()=>rej(new Error('Could not load '+u.split('/')[2]));document.head.appendChild(e)});
+let _lw=null,_xl=null;
+const needLW=()=>typeof LightweightCharts!=='undefined'?Promise.resolve():(_lw=_lw||loadJS('https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js').catch(e=>{_lw=null;throw e}));
+const needXLSX=()=>typeof XLSX!=='undefined'?Promise.resolve():(_xl=_xl||loadJS('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js').catch(e=>{_xl=null;throw e}));
+const T0=Date.now();let LIVE=false;
 let pt=null,snapDirty=false,pfTab='All',F=null;
 const SV=(k,v)=>{localStorage.setItem(k,JSON.stringify(v));if(SYNC.includes(k))queuePush()};
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
@@ -122,12 +131,13 @@ const DEFAULT_URL='https://angle-proxy.onrender.com';
 let cfg=LS('cfg',{url:'',token:''});if(!cfg.url)cfg.url=DEFAULT_URL;
 let WL=LS('wl',{'Watchlist 1':[{s:'RELIANCE',t:'2885'},{s:'TCS',t:'11536'},{s:'HDFCBANK',t:'1333'},{s:'INFY',t:'1594'},{s:'SBIN',t:'3045'}]});
 let cur=LS('cur','Watchlist 1'); if(!WL[cur])cur=Object.keys(WL)[0];
-let HOLD=LS('hold',[]),INDS=LS('inds',[]),tf=LS('tf','1D'),editing=false,Q={},CH=null,pfc=null,view='wl';
+let HOLD=LS('hold',[]),INDS=LS('inds',[]),tf=LS('tf','1D'),editing=false,Q=LS('qc',{}),CH=null,pfc=null,view='wl';
 const f2=x=>x==null?'--':Number(x).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const sg=x=>(x>=0?'+':'')+f2(x);
 const esc=x=>String(x??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 const normType=t=>{t=String(t||'').toLowerCase();return !t?'Stock':/etf/.test(t)?'ETF':/mf|mutual|fund/.test(t)?'MF':/stock|equity|share/.test(t)?'Stock':'Other'};
 let MFQ=LS('mfq',{});
+let PFR=LS('pfrange',null),pfBusy=0,pfN=-1,pfFirst=null,pfSaveT;
 let PFS=LS('pfsort',{k:'v',d:-1}),WLS=LS('wlsort',{k:'',d:1});
 const cmpBy=(k,d,gx)=>(a,b)=>{
   if(k==='s')return d*String(gx(a)).localeCompare(String(gx(b)));
@@ -160,7 +170,9 @@ async function api(path,opt={}){
 }
 function setLive(ok){
   const p=$('#pill');p.className=ok?'on':'off';
-  p.querySelector('span').textContent=ok?'LIVE · Angel One · '+new Date().toLocaleTimeString('en-GB'):'Disconnected';
+  const ct=+localStorage.getItem('qct')||0,at=ct?new Date(ct).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}):'';
+  p.querySelector('span').textContent=ok?'LIVE · Angel One · '+new Date().toLocaleTimeString('en-GB'):
+    (Date.now()-T0>90000?'Disconnected':'Connecting…')+(at?' · saved prices '+at:'');
 }
 
 /* ---------- cloud sync ---------- */
@@ -169,7 +181,7 @@ function queuePush(){clearTimeout(pt);pt=setTimeout(push,1500)}
 setInterval(()=>{if(snapDirty){snapDirty=false;queuePush()}},60000);
 async function push(){
   if(!cfg.token)return;
-  const st={ts:Date.now(),wl:WL,cur,hold:HOLD,inds:INDS,tf,snaps:LS('snaps',{})};
+  const st={ts:Date.now(),wl:WL,cur,hold:HOLD,inds:INDS,tf,pfr:PFR,snaps:LS('snaps',{})};
   localStorage.setItem('ts',st.ts);
   try{await api('/state',{method:'PUT',body:JSON.stringify(st)});cloud('Cloud backup saved '+new Date().toLocaleTimeString('en-GB'))}
   catch(e){cloud('Cloud backup failed: '+e.message)}
@@ -179,7 +191,7 @@ async function pull(){
   try{
     const s=await api('/state'),lts=+localStorage.getItem('ts')||0;let need=false;
     if(s.ts&&s.ts>lts){
-      WL=s.wl||WL;cur=WL[s.cur]?s.cur:Object.keys(WL)[0];HOLD=s.hold||[];fixHold();INDS=s.inds||[];tf=s.tf||tf;
+      WL=s.wl||WL;cur=WL[s.cur]?s.cur:Object.keys(WL)[0];HOLD=s.hold||[];fixHold();INDS=s.inds||[];tf=s.tf||tf;if(s.pfr){PFR=s.pfr;localStorage.setItem('pfrange',JSON.stringify(PFR));pfN=-1}
       localStorage.setItem('wl',JSON.stringify(WL));localStorage.setItem('cur',JSON.stringify(cur));localStorage.setItem('hold',JSON.stringify(HOLD));
       localStorage.setItem('inds',JSON.stringify(INDS));localStorage.setItem('tf',JSON.stringify(tf));localStorage.setItem('ts',s.ts);
     }else if(!s.ts||lts>s.ts)need=true;
@@ -199,13 +211,14 @@ async function refresh(){
     if(toks.length){let n=0;
       for(let i=0;i<toks.length;i+=50){const d=await api('/quote',{method:'POST',body:JSON.stringify({tokens:toks.slice(i,i+50)})});d.forEach(q=>Q[q.symbolToken]=q);n+=d.length}
       if(!n)throw new Error('empty');}
+    LIVE=true;try{localStorage.setItem('qc',JSON.stringify(Q));localStorage.setItem('qct',Date.now())}catch{}
     setLive(true);
   }catch(e){setLive(false)}
   try{await mfRefresh()}catch{}
   busy=false;renderWL();renderPF();if(CH)tickChart();
 }
 setInterval(()=>{if(!document.hidden)refresh()},5000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)pull().then(refresh)});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){refresh();pull().then(()=>{renderWL();renderPF()})}});
 
 /* ---------- navigation ---------- */
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
@@ -229,6 +242,7 @@ document.addEventListener('click',e=>{
   else if(t.dataset.pt){pfTab=t.dataset.pt;renderPF()}
   else if(t.dataset.ps){const k=t.dataset.ps;PFS=PFS.k===k?{k,d:-PFS.d}:{k,d:k==='s'?1:-1};localStorage.setItem('pfsort',JSON.stringify(PFS));renderPF()}
   else if(t.dataset.ws!=null){const k=t.dataset.ws;WLS=!k?{k:'',d:1}:WLS.k===k?{k,d:-WLS.d}:{k,d:k==='s'?1:-1};localStorage.setItem('wlsort',JSON.stringify(WLS));renderWL()}
+  else if(t.dataset.pr!=null){const n=+t.dataset.pr,ks=Object.keys(LS('snaps',{})).sort();if(ks.length){PFR={from:ks[n?Math.max(0,ks.length-n):0],to:ks[ks.length-1]};SV('pfrange',PFR);pfApply(PFR)}}
   else if(t.id==='newwl'){const n=prompt('Watchlist name');if(n&&!WL[n]){WL[n]=[];cur=n;SV('wl',WL);SV('cur',cur);renderWL()}}
   else if(t.dataset.del!=null){WL[cur].splice(+t.dataset.del,1);SV('wl',WL);renderWL()}
   else if(t.closest('.row')&&t.closest('#wlrows')&&!editing){const r=t.closest('.row');openChart(r.dataset.s,r.dataset.t)}
@@ -237,21 +251,51 @@ document.addEventListener('click',e=>{
 });
 $('#edit').onclick=()=>{editing=!editing;$('#edit').textContent=editing?'Done':'Edit';renderWL()};
 $('#dellist').onclick=()=>{if(confirm('Delete '+cur+'?')){delete WL[cur];cur=Object.keys(WL)[0];SV('wl',WL);SV('cur',cur);renderWL()}};
+$('#wlimp').onclick=()=>{needXLSX().catch(()=>{});$('#wlfile').click()};
+$('#wlfile').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;const note=$('#wlnote');
+  try{
+    note.textContent='Reading file…';await needXLSX();
+    const wb=XLSX.read(await f.arrayBuffer()),sh=wb.Sheets[wb.SheetNames[0]],keys=['symbol','stock','scrip','instrument','name','companyname','securityname','instrumentname','scripname','stockname','tradingsymbol','ticker'];
+    let names=XLSX.utils.sheet_to_json(sh).map(r=>{for(const k in r)if(keys.includes(k.toLowerCase().replace(/[^a-z]/g,'')))return String(r[k]||'').trim()}).filter(Boolean);
+    if(!names.length)names=XLSX.utils.sheet_to_json(sh,{header:1}).map(r=>String(r[0]??'').trim()).filter(x=>x&&!/^(symbol|name|stock|scrip|instrument)$/i.test(x));
+    names=[...new Set(names.map(x=>x.toUpperCase()))];
+    if(!names.length){note.textContent='No symbols found. Put symbols in the first column or a column named Symbol.';e.target.value='';return}
+    let added=0,dup=0;const miss=[];
+    for(let i=0;i<names.length;i++){
+      note.textContent='Matching '+(i+1)+'/'+names.length+'…';
+      const m=await autoMatch(names[i]);
+      if(!m)miss.push(names[i]);else if(WL[cur].find(x=>x.t===m.token))dup++;else{WL[cur].push({s:m.symbol,t:m.token});added++}
+    }
+    SV('wl',WL);renderWL();refresh();
+    note.textContent='Added '+added+(dup?' · already in list '+dup:'')+(miss.length?' · not found: '+miss.slice(0,8).join(', ')+(miss.length>8?'…':''):'');
+  }catch(err){note.textContent='Import failed: '+err.message}
+  e.target.value='';
+};
 $('#addsym').onclick=()=>openSearch(m=>{if(!WL[cur].find(x=>x.t===m.token)){WL[cur].push({s:m.symbol,t:m.token});SV('wl',WL);refresh()}});
 
 /* ---------- modal / search ---------- */
 function showModal(html){$('#sheet').innerHTML=html;$('#sheet').onclick=null;$('#sheet').oninput=null;$('#modal').classList.add('show')}
 $('#modal').onclick=e=>{if(e.target.id==='modal')$('#modal').classList.remove('show')};
 function openSearch(cb,pre){
-  showModal('<input type="text" id="q" placeholder="Search NSE symbol or name" autocapitalize="characters"><div class="list" id="res"></div>');
-  let tm;$('#q').focus();if(pre)setTimeout(()=>{$('#q').value=pre;$('#q').oninput({target:$('#q')})},0);
-  $('#q').oninput=e=>{clearTimeout(tm);tm=setTimeout(async()=>{
-    const v=e.target.value.trim();if(v.length<2)return;
-    try{const r=await api('/search?q='+encodeURIComponent(v));
-      $('#res').innerHTML=r.map((m,i)=>`<div class="it" data-i="${i}"><b>${m.symbol}</b><small>${m.name||''}</small></div>`).join('');
-      $('#res').onclick=ev=>{const it=ev.target.closest('.it');if(it){$('#modal').classList.remove('show');cb(r[+it.dataset.i])}};
-    }catch{$('#res').innerHTML='<div class="it">Search failed – check Settings</div>'}
-  },300)};
+  showModal('<input type="text" id="q" placeholder="Search NSE symbol or name" autocapitalize="characters" autocomplete="off"><div class="list" id="res"></div>');
+  let tm,seq=0;$('#q').focus();
+  const msg=t=>{$('#res').innerHTML='<div class="it"><small>'+t+'</small></div>'};
+  const run=async v=>{
+    const my=++seq;msg('Searching…');
+    for(let a=0;a<3;a++){
+      try{
+        const r=await api('/search?q='+encodeURIComponent(v));if(my!==seq)return;
+        $('#res').innerHTML=r.length?r.map((m,i)=>`<div class="it" data-i="${i}"><b>${esc(m.symbol)}</b><small>${esc(m.name||'')}</small></div>`).join(''):'<div class="it"><small>No match – try fewer letters</small></div>';
+        $('#res').onclick=ev=>{const it=ev.target.closest('.it');if(it&&it.dataset.i!=null){$('#modal').classList.remove('show');cb(r[+it.dataset.i])}};
+        return;
+      }catch(err){if(my!==seq)return;
+        if(a<2){msg('Server is waking up… retrying ('+(a+1)+'/2)');await new Promise(r=>setTimeout(r,4000));if(my!==seq)return}
+        else msg('Search failed: '+esc(err.message))}
+    }
+  };
+  $('#q').oninput=e=>{clearTimeout(tm);const v=e.target.value.trim();if(v.length<2){seq++;$('#res').innerHTML='';return}tm=setTimeout(()=>run(v),250)};
+  if(pre){$('#q').value=pre;if(pre.trim().length>=2)run(pre.trim())}
 }
 
 function openMFSearch(cb,pre){
@@ -272,9 +316,10 @@ function openMFSearch(cb,pre){
 }
 
 /* ---------- portfolio ---------- */
-$('#imp').onclick=()=>$('#file').click();
+$('#imp').onclick=()=>{needXLSX().catch(()=>{});$('#file').click()};
 $('#file').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
+  try{await needXLSX()}catch(err){$('#pfnote').textContent='Import library failed to load – check internet';return}
   const wb=XLSX.read(await f.arrayBuffer()),rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
   const g=(r,ks)=>{for(const k in r)if(ks.includes(k.toLowerCase().replace(/[^a-z]/g,'')))return r[k]};
   const out=[];
@@ -313,9 +358,14 @@ function renderPF(){
   $('#pfsub').innerHTML=HOLD.length?`<div class="stats"><div><small>Invested</small>${S.inv?'₹'+f2(S.inv):'--'}</div><div><small>Today</small><span class="${S.day>=0?'g':'r'}">${rs(S.day)}<br><span style="font-size:12px">${sg(dp)}%</span></span></div><div><small>Total gain</small>${S.inv?`<span class="${gain>=0?'g':'r'}">${rs(gain)}<br><span style="font-size:12px">${sg(gp)}%</span></span>`:'--'}</div></div>${all.miss?`<div style="margin-top:10px;font-size:12px;color:#ff9800">${all.miss} holding(s) have no price – tap them to fix</div>`:''}`:'';
   if(pfTab==='All'&&HOLD.length){const parts=TABS.filter(([k])=>k!=='All').map(([k,l])=>{const x=sum(rows.filter(r=>r.ty===k));return l+' ('+rows.filter(r=>r.ty===k).length+'): invested ₹'+f2(x.inv)+' · value ₹'+f2(x.val)});$('#pfsub').insertAdjacentHTML('beforeend','<div style="margin-top:10px;font-size:12px;color:#787b86;line-height:1.7">'+parts.join('<br>')+'</div>')}
   {const c={};rows.forEach(r=>{const k=String(r.s).toUpperCase();c[k]=(c[k]||0)+1});const d=Object.keys(c).filter(k=>c[k]>1);if(d.length)$('#pfsub').insertAdjacentHTML('beforeend','<div style="margin-top:10px;font-size:12px;color:#ff9800">Duplicate names: '+d.map(esc).join(', ')+'</div>')}
+  const tm=PFS.k==='day'||PFS.k==='dayp';
+  $('#pfh2').textContent=PFS.k==='inv'?'Invested ₹':'Value ₹';$('#pfh3').textContent=tm?'Today %':'P&L %';
+  const c2=r=>`<span class="n">${PFS.k==='inv'?(r.inv?'₹'+f2(r.inv):'--'):(r.priced?'₹'+f2(r.v):'--')}</span>`;
+  const c3=r=>tm?(r.dayp!=null?`<span class="n ${r.day>=0?'g':'r'}">${sg(r.dayp)}%<br><small>${rs(r.day)}</small></span>`:'<span class="n">--</span>')
+    :`<span class="n ${(r.pl||0)>=0?'g':'r'}">${r.plp!=null?sg(r.plp)+'%<br><small>'+rs(r.pl)+'</small>':''}</span>`;
   $('#pfsort').innerHTML=shown.length>1?[['v','Value'],['inv','Invested'],['day','Today'],['dayp','Today %'],['pl','P&L'],['plp','P&L %'],['s','Name']].map(([k,l])=>sortChip('ps',k,l,PFS)).join(''):'';
-  $('#pfrows').innerHTML=rows.length?[...shown].sort(cmpBy(PFS.k,PFS.d,r=>r[PFS.k])).map(r=>`<div class="row" data-i="${r.i}" style="grid-template-columns:1.6fr 1fr 1fr"><span><b>${esc(r.s)}</b>${r.t?` <i data-chart="${r.i}" style="font-style:normal">📈</i>`:''}<br><small style="color:#787b86">${pfTab==='All'?r.ty+' · ':''}${r.sym&&r.sym!==r.s?esc(r.sym)+' · ':''}${r.qty} × ${r.priced?'₹'+f2(r.p):'--'}${!r.t&&!r.mf&&r.man?' (manual)':''}${r.mf&&MFQ[r.mf]?' · NAV '+esc(MFQ[r.mf].date):''}${r.avg?' · Avg ₹'+f2(r.avg):''}</small>${r.priced?'':`<br><small style="color:#ff9800">Tap to ${r.ty==='MF'?'find fund or set NAV':'set NSE symbol or price'}</small>`}${r.ty==='MF'&&!r.mf?'<br><small style="color:#ff9800">Tap to match fund for live NAV</small>':''}</span><span class="n">${r.priced?'₹'+f2(r.v):'--'}</span><span class="n ${(r.pl||0)>=0?'g':'r'}">${r.plp!=null?sg(r.plp)+'%<br><small>'+rs(r.pl)+'</small>':''}</span></div>`).join(''):'<div class="hint" style="padding:20px">No holdings yet. Tap ＋ Add or import an Excel file.</div>';
-  if(all.val>0&&!all.miss){const sn=LS('snaps',{}),d=new Date(Date.now()+19800e3).toISOString().slice(0,10);sn[d]=Math.round(all.val*100)/100;localStorage.setItem('snaps',JSON.stringify(sn));snapDirty=true}
+  $('#pfrows').innerHTML=rows.length?[...shown].sort(cmpBy(PFS.k,PFS.d,r=>PFS.k==='day'&&r.dayp==null?null:r[PFS.k])).map(r=>`<div class="row" data-i="${r.i}" style="grid-template-columns:1.6fr 1fr 1fr"><span><b>${esc(r.s)}</b>${r.t?` <i data-chart="${r.i}" style="font-style:normal">📈</i>`:''}<br><small style="color:#787b86">${pfTab==='All'?r.ty+' · ':''}${r.sym&&r.sym!==r.s?esc(r.sym)+' · ':''}${r.qty} × ${r.priced?'₹'+f2(r.p):'--'}${!r.t&&!r.mf&&r.man?' (manual)':''}${r.mf&&MFQ[r.mf]?' · NAV '+esc(MFQ[r.mf].date):''}${r.avg?' · Avg ₹'+f2(r.avg):''}</small>${r.priced?'':`<br><small style="color:#ff9800">Tap to ${r.ty==='MF'?'find fund or set NAV':'set NSE symbol or price'}</small>`}${r.ty==='MF'&&!r.mf?'<br><small style="color:#ff9800">Tap to match fund for live NAV</small>':''}</span>${c2(r)}${c3(r)}</div>`).join(''):'<div class="hint" style="padding:20px">No holdings yet. Tap ＋ Add or import an Excel file.</div>';
+  if(LIVE&&all.val>0&&!all.miss){const sn=LS('snaps',{}),d=new Date(Date.now()+19800e3).toISOString().slice(0,10);sn[d]=Math.round(all.val*100)/100;localStorage.setItem('snaps',JSON.stringify(sn));snapDirty=true}
   $('#pfchartcard').style.display=pfTab==='All'?'':'none';
   if(view==='pf'&&pfTab==='All')drawPF();
 }
@@ -357,20 +407,44 @@ async function saveForm(){
   if(F.i>=0)HOLD[F.i]=item;else HOLD.push(item);
   SV('hold',HOLD);$('#modal').classList.remove('show');refresh();
 }
+function pfApply(r){
+  if(!pfc)return;pfBusy=Date.now();
+  try{if(r&&r.from&&r.to)pfc.timeScale().setVisibleRange({from:r.from,to:r.to});else pfc.timeScale().fitContent()}
+  catch{try{pfc.timeScale().fitContent()}catch{}}
+}
 function drawPF(){
-  if(typeof LightweightCharts==='undefined')return;
+  if(typeof LightweightCharts==='undefined'){needLW().then(()=>{if(view==='pf')drawPF()}).catch(()=>{$('#pfnote').textContent='Chart library could not load – check internet'});return}
   const el=$('#pfchart');if(!el.clientWidth)return;
-  if(!pfc){pfc=LightweightCharts.createChart(el,{width:el.clientWidth,height:150,layout:{background:{type:'solid',color:'#1e222d'},textColor:'#d1d4dc'},grid:{vertLines:{visible:false},horzLines:{color:'#2a2e39'}},rightPriceScale:{borderColor:'#2a2e39'},timeScale:{borderColor:'#2a2e39'}});pfc.ser=pfc.addAreaSeries({lineColor:'#2962ff',topColor:'#2962ff66',bottomColor:'#2962ff00'})}
-  const s=LS('snaps',{}),d=Object.keys(s).sort().map(k=>({time:k,value:s[k]}));
-  pfc.ser.setData(d);pfc.timeScale().fitContent();
+  if(!pfc){
+    pfc=LightweightCharts.createChart(el,{width:el.clientWidth,height:150,layout:{background:{type:'solid',color:'#1e222d'},textColor:'#d1d4dc'},grid:{vertLines:{visible:false},horzLines:{color:'#2a2e39'}},rightPriceScale:{borderColor:'#2a2e39'},timeScale:{borderColor:'#2a2e39',rightOffset:2}});
+    pfc.ser=pfc.addAreaSeries({lineColor:'#2962ff',topColor:'#2962ff66',bottomColor:'#2962ff00'});
+    pfc.timeScale().subscribeVisibleTimeRangeChange(r=>{
+      if(!r||!r.from||!r.to||Date.now()-pfBusy<900)return;
+      clearTimeout(pfSaveT);pfSaveT=setTimeout(()=>{PFR={from:r.from,to:r.to};SV('pfrange',PFR)},700);
+    });
+  }
+  const sn=LS('snaps',{}),d=Object.keys(sn).sort().map(k=>({time:k,value:sn[k]})),first=d.length?d[0].time:null;
+  if(d.length&&pfN===d.length&&pfFirst===first)pfc.ser.update(d[d.length-1]);   /* live tick: do not touch the zoom */
+  else{pfc.ser.setData(d);pfN=d.length;pfFirst=first;pfApply(PFR||(d.length?{from:d[Math.max(0,d.length-15)].time,to:d[d.length-1].time}:null))}
   $('#pfnote').textContent=d.length<2?'Trend line builds up as you open the app each day.':'';
 }
-
-/* ---------- settings ---------- */
-$('#cfgurl').value=cfg.url;$('#cfgtok').value=cfg.token;
-$('#save').onclick=()=>{cfg={url:$('#cfgurl').value.trim(),token:$('#cfgtok').value.trim()};SV('cfg',cfg);$('#pill span').textContent='Connecting… (first load can take ~30s)';pull().then(refresh)};
-$('#rsnap').onclick=()=>{if(confirm('Clear the saved daily portfolio value history (local + cloud)?')){localStorage.setItem('snaps','{}');push().then(()=>{if(pfc)pfc.ser.setData([]);renderPF()})}};
-if(!cfg.token)document.querySelector('nav [data-v=set]').click();else pull().then(refresh);
+$('#save').onclick=()=>{cfg={url:$('#cfgurl').value.trim(),token:$('#cfgtok').value.trim()};SV('cfg',cfg);$('#pill span').textContent='Connecting… (first load can take ~30s)';refresh();pull().then(()=>{renderWL();renderPF()})};
+$('#spd').onclick=async()=>{
+  const out=$('#spdout'),lines=[];
+  const t=async(n,fn)=>{out.textContent=lines.concat(n+' …').join('\n');const a=performance.now();
+    try{await fn();lines.push(n+': '+Math.round(performance.now()-a)+' ms')}catch(e){lines.push(n+': FAILED ('+String(e.message).slice(0,50)+')')}out.textContent=lines.join('\n')};
+  const base=cfg.url.replace(/\/$/,'');
+  await t('1 Server wake-up (no login)',()=>fetch(base+'/',{mode:'no-cors',cache:'no-store'}));
+  await t('2 Cloud state',()=>api('/state'));
+  await t('3 First live quote (Angel login)',()=>api('/quote',{method:'POST',body:JSON.stringify({tokens:['2885']})}));
+  await t('4 Second quote (warm)',()=>api('/quote',{method:'POST',body:JSON.stringify({tokens:['2885']})}));
+  await t('5 Symbol search',()=>api('/search?q=RELI'));
+  await t('6 Mutual fund API',()=>fetch('https://api.mfapi.in/mf/search?q=parag'));
+  lines.push('\nBig number on 1 = server was asleep. Big on 3 = Angel login. Big on 5 = symbol list loading.');out.textContent=lines.join('\n');
+};
+$('#rsnap').onclick=()=>{if(confirm('Clear the saved daily portfolio value history (local + cloud)?')){localStorage.setItem('snaps','{}');push().then(()=>{pfN=-1;PFR=null;SV('pfrange',null);if(pfc)pfc.ser.setData([]);renderPF()})}};
+if(!cfg.token)document.querySelector('nav [data-v=set]').click();else{setLive(false);refresh();pull().then(()=>{renderWL();renderPF()})}
+renderWL();renderPF();
 
 /* ---------- indicator maths ---------- */
 const sma=(a,n)=>a.map((_,i)=>{if(i<n-1)return null;const w=a.slice(i-n+1,i+1);return w.includes(null)?null:w.reduce((x,y)=>x+y,0)/n});
@@ -416,11 +490,12 @@ const TF={'1m':['ONE_MINUTE',25],'3m':['THREE_MINUTE',55],'5m':['FIVE_MINUTE',90
 const opt=h=>({height:h,layout:{background:{type:'solid',color:'#131722'},textColor:'#d1d4dc'},grid:{vertLines:{color:'#1e222d'},horzLines:{color:'#1e222d'}},rightPriceScale:{borderColor:'#2a2e39',minimumWidth:62},timeScale:{borderColor:'#2a2e39',timeVisible:!['1D','1W','1M'].includes(tf),secondsVisible:false,rightOffset:6},crosshair:{mode:0}});
 function aggregate(d,m){const o=[];let k=null,b=null;for(const x of d){const dt=new Date(x.time*1000);const key=m==='M'?dt.getUTCFullYear()*100+dt.getUTCMonth():Math.floor(x.time/86400)-((dt.getUTCDay()+6)%7);if(key!==k){k=key;b={...x};o.push(b)}else{b.high=Math.max(b.high,x.high);b.low=Math.min(b.low,x.low);b.close=x.close;b.volume+=x.volume}}return o}
 
-function openChart(s,t){
+async function openChart(s,t){
   $('#cv').classList.add('show');$('#cvsym').textContent=s;
   CH={s,t,data:[],D:{t:[],o:[],h:[],l:[],c:[],v:[]},items:[],panes:[],main:null,loaded:Date.now()};
   $('#tfs').innerHTML=Object.keys(TF).map(k=>`<button data-tf="${k}" class="${k===tf?'on':''}">${k}</button>`).join('');
-  if(!safeBuild())return;loadData();tickChart();
+  try{await needLW()}catch(err){$('#cvmsg').textContent='Chart library could not load – check internet';return}
+  if(!CH)return;if(!safeBuild())return;loadData();tickChart();
 }
 $('#cvback').onclick=()=>{$('#cv').classList.remove('show');if(CH){CH.main.remove();CH.panes.forEach(c=>c.remove())}CH=null;$('#panes').innerHTML=''};
 $('#tfs').onclick=e=>{const k=e.target.dataset.tf;if(!k||!CH)return;tf=k;SV('tf',tf);document.querySelectorAll('#tfs button').forEach(b=>b.classList.toggle('on',b.dataset.tf===k));if(!safeBuild())return;loadData()};
