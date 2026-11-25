@@ -428,7 +428,14 @@ function drawPF(){
   else{pfc.ser.setData(d);pfN=d.length;pfFirst=first;pfApply(PFR||(d.length?{from:d[Math.max(0,d.length-15)].time,to:d[d.length-1].time}:null))}
   $('#pfnote').textContent=d.length<2?'Trend line builds up as you open the app each day.':'';
 }
-$('#save').onclick=()=>{cfg={url:$('#cfgurl').value.trim(),token:$('#cfgtok').value.trim()};SV('cfg',cfg);$('#pill span').textContent='Connecting… (first load can take ~30s)';refresh();pull().then(()=>{renderWL();renderPF()})};
+$('#cfgurl').value=cfg.url||'';$('#cfgtok').value=cfg.token||'';
+$('#save').onclick=()=>{
+  const u=$('#cfgurl').value.trim().replace(/\/$/,'')||DEFAULT_URL,tk=$('#cfgtok').value.trim()||cfg.token||'';
+  if(!tk){cloud('Enter the APP_TOKEN first');return}
+  cfg={url:u,token:tk};SV('cfg',cfg);$('#cfgurl').value=u;$('#cfgtok').value=tk;
+  cloud('Saved on this phone');$('#pill span').textContent='Saved · connecting… (first load can take ~30s)';
+  refresh();pull().then(()=>{renderWL();renderPF()});
+};
 $('#spd').onclick=async()=>{
   const out=$('#spdout'),lines=[];
   const t=async(n,fn)=>{out.textContent=lines.concat(n+' …').join('\n');const a=performance.now();
