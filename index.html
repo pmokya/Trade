@@ -66,7 +66,7 @@ label{font-size:12px;color:#787b86}
 #sheet small{color:#787b86}
 </style>
 <link rel="preconnect" href="https://angle-proxy.onrender.com">
-<script>try{var _c=JSON.parse(localStorage.getItem('cfg')||'{}');fetch((_c.url||'https://angle-proxy.onrender.com')+'/',{mode:'no-cors',cache:'no-store'}).catch(function(){})}catch(e){}</script>
+<script>try{var _c=JSON.parse(localStorage.getItem('cfg')||'{}');fetch((/^https?:\/\//i.test(_c.url||'')?_c.url:_c.url?'https://'+_c.url:'https://angle-proxy.onrender.com').replace(/\/+$/,'')+'/',{mode:'no-cors',cache:'no-store'}).catch(function(){})}catch(e){}</script>
 </head>
 <body>
 <div id="app">
@@ -92,14 +92,15 @@ label{font-size:12px;color:#787b86}
   <div id="pfrows"></div>
  </section>
  <section class="view" id="v-set" style="padding:14px">
-  <label>Render URL</label><input type="url" id="cfgurl" placeholder="https://your-service.onrender.com">
+  <label>Server URL (Northflank or Render)</label><input type="url" id="cfgurl" placeholder="https://your-service.onrender.com">
   <label>APP_TOKEN</label><input type="password" id="cfgtok">
   <div class="bar" style="padding:0"><button class="btn pri" id="save">Save &amp; connect</button></div>
   <p class="hint" id="cloud" style="padding:12px 0 0"></p>
   <div class="bar" style="padding:0"><button class="btn" id="rsnap" style="color:#ef5350">Reset portfolio trend history</button></div>
   <div class="bar" style="padding:8px 0 0"><button class="btn" id="spd">Test connection speed</button></div>
   <pre class="hint" id="spdout" style="white-space:pre-wrap;padding:6px 0;font-family:inherit"></pre>
-  <p class="hint" style="padding:6px 0">Watchlists, holdings and portfolio history are saved to your own cloud store (via your Render proxy), so they come back even if this phone forgets them. Only the token is kept on the phone.</p>
+  <a id="spdlink" target="_blank" rel="noopener" style="display:none;color:#2962ff;word-break:break-all;padding:0 0 10px"></a>
+  <p class="hint" style="padding:6px 0">Watchlists, holdings and portfolio history are saved to your own cloud store (via your proxy server), so they come back even if this phone forgets them. Only the token is kept on the phone.</p>
  </section>
 </main>
 <nav><button data-v="wl" class="on">Watchlist</button><button data-v="pf">Portfolio</button><button data-v="set">Settings</button></nav>
@@ -128,7 +129,8 @@ const SV=(k,v)=>{localStorage.setItem(k,JSON.stringify(v));if(SYNC.includes(k))q
 if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();
 const COL={up:'#26a69a',dn:'#ef5350'},PAL=['#2962ff','#ff9800','#e91e63','#9c27b0','#00bcd4','#ffeb3b','#8bc34a'];
 const DEFAULT_URL='https://angle-proxy.onrender.com';
-let cfg=LS('cfg',{url:'',token:''});if(!cfg.url)cfg.url=DEFAULT_URL;
+const fixUrl=u=>{u=String(u||'').trim().replace(/\/+$/,'');return u&&!/^https?:\/\//i.test(u)?'https://'+u:u};
+let cfg=LS('cfg',{url:'',token:''});if(!cfg.url)cfg.url=DEFAULT_URL;cfg.url=fixUrl(cfg.url);
 let WL=LS('wl',{'Watchlist 1':[{s:'RELIANCE',t:'2885'},{s:'TCS',t:'11536'},{s:'HDFCBANK',t:'1333'},{s:'INFY',t:'1594'},{s:'SBIN',t:'3045'}]});
 let cur=LS('cur','Watchlist 1'); if(!WL[cur])cur=Object.keys(WL)[0];
 let HOLD=LS('hold',[]),INDS=LS('inds',[]),tf=LS('tf','1D'),editing=false,Q=LS('qc',{}),CH=null,pfc=null,view='wl';
@@ -168,11 +170,11 @@ async function api(path,opt={}){
   const r=await fetch(cfg.url.replace(/\/$/,'')+path,{...opt,headers:{'x-app-token':cfg.token,'Content-Type':'application/json'}});
   if(!r.ok){let m='';try{m=(await r.text()).slice(0,160)}catch{}throw new Error(r.status+' '+m)}return r.json();
 }
-function setLive(ok){
-  const p=$('#pill');p.className=ok?'on':'off';
+function setLive(ok,why){
+  const p=$('#pill');p.className=ok?'on':'off';p.title=why||'';
   const ct=+localStorage.getItem('qct')||0,at=ct?new Date(ct).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}):'';
   p.querySelector('span').textContent=ok?'LIVE · Angel One · '+new Date().toLocaleTimeString('en-GB'):
-    (Date.now()-T0>90000?'Disconnected':'Connecting…')+(at?' · saved prices '+at:'');
+    (Date.now()-T0>90000?'Disconnected':'Connecting…')+(why?' ('+String(why).slice(0,34)+')':'')+(at?' · saved prices '+at:'');
 }
 
 /* ---------- cloud sync ---------- */
@@ -208,12 +210,15 @@ async function refresh(){
   if(!cfg.url||busy)return;busy=true;
   const toks=[...new Set([...Object.values(WL).flat().map(x=>x.t),...HOLD.filter(h=>h.t).map(h=>h.t),...(CH?[CH.t]:[])])];
   try{
-    if(toks.length){let n=0;
-      for(let i=0;i<toks.length;i+=50){const d=await api('/quote',{method:'POST',body:JSON.stringify({tokens:toks.slice(i,i+50)})});d.forEach(q=>Q[q.symbolToken]=q);n+=d.length}
-      if(!n)throw new Error('empty');}
-    LIVE=true;try{localStorage.setItem('qc',JSON.stringify(Q));localStorage.setItem('qct',Date.now())}catch{}
-    setLive(true);
-  }catch(e){setLive(false)}
+    let ok=!toks.length,err='';
+    for(let i=0;i<toks.length;i+=50){
+      if(i)await new Promise(r=>setTimeout(r,300));
+      try{const d=await api('/quote',{method:'POST',body:JSON.stringify({tokens:toks.slice(i,i+50)})});d.forEach(q=>Q[q.symbolToken]=q);ok=true}
+      catch(e){err=(String(e.message).match(/"error":"([^"]+)"/)||[0,String(e.message)])[1]}
+    }
+    if(ok){LIVE=true;try{localStorage.setItem('qc',JSON.stringify(Q));localStorage.setItem('qct',Date.now())}catch{}setLive(true)}
+    else setLive(false,err);
+  }catch(e){setLive(false,String(e.message))}
   try{await mfRefresh()}catch{}
   busy=false;renderWL();renderPF();if(CH)tickChart();
 }
@@ -430,7 +435,7 @@ function drawPF(){
 }
 $('#cfgurl').value=cfg.url||'';$('#cfgtok').value=cfg.token||'';
 $('#save').onclick=()=>{
-  const u=$('#cfgurl').value.trim().replace(/\/$/,'')||DEFAULT_URL,tk=$('#cfgtok').value.trim()||cfg.token||'';
+  const u=fixUrl($('#cfgurl').value)||DEFAULT_URL,tk=$('#cfgtok').value.trim()||cfg.token||'';
   if(!tk){cloud('Enter the APP_TOKEN first');return}
   cfg={url:u,token:tk};SV('cfg',cfg);$('#cfgurl').value=u;$('#cfgtok').value=tk;
   cloud('Saved on this phone');$('#pill span').textContent='Saved · connecting… (first load can take ~30s)';
@@ -439,8 +444,10 @@ $('#save').onclick=()=>{
 $('#spd').onclick=async()=>{
   const out=$('#spdout'),lines=[];
   const t=async(n,fn)=>{out.textContent=lines.concat(n+' …').join('\n');const a=performance.now();
-    try{await fn();lines.push(n+': '+Math.round(performance.now()-a)+' ms')}catch(e){lines.push(n+': FAILED ('+String(e.message).slice(0,50)+')')}out.textContent=lines.join('\n')};
+    try{await fn();lines.push(n+': '+Math.round(performance.now()-a)+' ms')}catch(e){lines.push(n+': FAILED ('+String(e.message).slice(0,50)+(/load failed|failed to fetch/i.test(e.message)?' – phone could not reach this address':'')+')')}out.textContent=lines.join('\n')};
   const base=cfg.url.replace(/\/$/,'');
+  const lk=$('#spdlink');lk.href=base+'/';lk.textContent='Tap to open '+base+' (page should say: ok)';lk.style.display='block';
+  lines.push('Address used: '+base);
   await t('1 Server wake-up (no login)',()=>fetch(base+'/',{mode:'no-cors',cache:'no-store'}));
   await t('2 Cloud state',()=>api('/state'));
   await t('3 First live quote (Angel login)',()=>api('/quote',{method:'POST',body:JSON.stringify({tokens:['2885']})}));
